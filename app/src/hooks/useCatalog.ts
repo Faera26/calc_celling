@@ -194,7 +194,7 @@ export function useCatalog({ authReady, userId, userEmail }: UseCatalogOptions) 
             offset: from,
             search: debouncedSearch,
           }),
-          `${titleOf(activeType)}: PROXY страница ${page}`
+          `${titleOf(activeType)}: страница ${page}`
         );
 
         if (cancelled) return;
@@ -282,6 +282,7 @@ export function useCatalog({ authReady, userId, userEmail }: UseCatalogOptions) 
 }
 
 // Exported for use in NodeDetailsDialog
+
 export async function openNodeDetails(
   node: UzelItem,
   loadFn: (id: string) => Promise<UzelComponent[]>,
