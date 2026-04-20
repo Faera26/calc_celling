@@ -5,7 +5,6 @@ import {
   Button,
   Card,
   CardContent,
-  Chip,
   CircularProgress,
   Dialog,
   DialogActions,
@@ -15,7 +14,6 @@ import {
   IconButton,
   MenuItem,
   Stack,
-  Switch,
   TextField,
   Typography,
   Autocomplete,
@@ -40,10 +38,10 @@ import type {
   SavedEstimateRoom,
 } from '../types';
 import { generatePdf } from '../PdfExport';
-import { adjustedPrice, labelOf, money } from '../utils';
+import { labelOf, money } from '../utils';
 import { restDelete, restInsert, restSelect, restUpdate } from '../supabaseRest';
 import { supabase } from '../supabaseClient';
-import { cleanSearch, formatError, withTimeout } from '../utils';
+import { cleanSearch } from '../utils';
 
 interface EstimatesPageProps {
   auth: AuthState;
@@ -80,37 +78,6 @@ interface AddLocalPositionDraft {
 }
 
 const COMMON_ROOM = 'common';
-
-const pdfTemplates: Array<{ value: EstimatePdfTemplate; label: string; hint: string }> = [
-  { value: 'wave', label: 'Волна', hint: 'Шапка цветом, как на мобильном шаблоне' },
-  { value: 'stripe', label: 'Полосы', hint: 'Акцентные линии сверху и снизу' },
-  { value: 'classic', label: 'Классика', hint: 'Минимальный белый документ' },
-  { value: 'dark', label: 'Тёмный', hint: 'Контрастный цветной лист' },
-];
-
-const pdfPalette = [
-  '#2F3133',
-  '#505356',
-  '#455A64',
-  '#5D4037',
-  '#C61F2B',
-  '#D4146A',
-  '#7B1FA2',
-  '#4527A0',
-  '#303F9F',
-  '#1565C0',
-  '#0277BD',
-  '#00695C',
-  '#2E7D32',
-  '#558B2F',
-];
-
-const statusLabels: Record<string, string> = {
-  draft: 'Черновик',
-  sent: 'Отправлено',
-  accepted: 'Принято',
-  archived: 'Архив',
-};
 
 function formatDate(value?: string | null) {
   if (!value) return '-';
@@ -205,7 +172,6 @@ export default function EstimatesPage({ auth, settings }: EstimatesPageProps) {
   const [positionDrafts, setPositionDrafts] = useState<SavedEstimatePosition[]>([]);
   const [deletedRoomIds, setDeletedRoomIds] = useState<string[]>([]);
   const [deletedPositionIds, setDeletedPositionIds] = useState<string[]>([]);
-  const [pdfLoading, setPdfLoading] = useState(false);
 
   // Catalog search for adding positions
   const [catalogSearch, setCatalogSearch] = useState('');
@@ -262,39 +228,10 @@ export default function EstimatesPage({ auth, settings }: EstimatesPageProps) {
     [positionDrafts]
   );
 
-  const componentsCount = useMemo(
-    () => positionDrafts.reduce((sum, position) => sum + componentSnapshots(position).length, 0),
-    [positionDrafts]
-  );
-
   const roomNameById = useMemo(
     () => new Map(roomDrafts.map(room => [room.id, room.name || 'Комната'])),
     [roomDrafts]
   );
-
-  const sectionTotals = useMemo(() => {
-    const groups = new Map<string, { key: string; name: string; count: number; total: number }>();
-    const commonName = estimateDraft.useCommonSection ? 'Общие работы' : 'Без комнаты';
-    const hasCommonPositions = positionDrafts.some(position => !position.room_id || !roomNameById.has(position.room_id));
-
-    if (estimateDraft.useCommonSection || hasCommonPositions) {
-      groups.set(COMMON_ROOM, { key: COMMON_ROOM, name: commonName, count: 0, total: 0 });
-    }
-
-    roomDrafts.forEach(room => {
-      groups.set(room.id, { key: room.id, name: room.name || 'Комната', count: 0, total: 0 });
-    });
-
-    positionDrafts.forEach(position => {
-      const key = position.room_id && roomNameById.has(position.room_id) ? position.room_id : COMMON_ROOM;
-      const group = groups.get(key) || { key, name: commonName, count: 0, total: 0 };
-      group.count += 1;
-      group.total += num(position.total);
-      groups.set(key, group);
-    });
-
-    return [...groups.values()];
-  }, [estimateDraft.useCommonSection, positionDrafts, roomDrafts, roomNameById]);
 
   const originalRoomIds = useMemo(() => new Set(rooms.map(room => room.id)), [rooms]);
   const originalPositionIds = useMemo(() => new Set(positions.map(position => position.id)), [positions]);
@@ -302,14 +239,6 @@ export default function EstimatesPage({ auth, settings }: EstimatesPageProps) {
   function sectionNameOf(roomId?: string | null) {
     if (roomId && roomNameById.has(roomId)) return roomNameById.get(roomId)!;
     return estimateDraft.useCommonSection ? 'Общие работы' : 'Без комнаты';
-  }
-
-  function priceWithDraftMargin(basePrice: number) {
-    return adjustedPrice(basePrice, {
-      ...settings,
-      marginPercent: num(estimateDraft.marginPercent),
-      discountPercent: num(estimateDraft.discountPercent),
-    });
   }
 
   async function loadEstimates() {
@@ -420,37 +349,6 @@ export default function EstimatesPage({ auth, settings }: EstimatesPageProps) {
     return () => { cancelled = true; };
   }, [selectedEstimate?.id]);
 
-  function updateRoom(roomId: string, patch: Partial<SavedEstimateRoom>) {
-    setRoomDrafts(prev => prev.map(room => room.id === roomId ? { ...room, ...patch } : room));
-  }
-
-  function addRoom() {
-    if (!selectedEstimate) return;
-    setRoomDrafts(prev => [
-      ...prev,
-      {
-        id: crypto.randomUUID(),
-        smeta_id: selectedEstimate.id,
-        position_index: prev.length + 1,
-        name: `Комната ${prev.length + 1}`,
-        area: 0,
-        perimeter: 0,
-        corners: 0,
-        light_points: 0,
-        pipes: 0,
-        curtain_tracks: 0,
-        niches: 0,
-        comment: '',
-      },
-    ]);
-  }
-
-  function removeRoom(roomId: string) {
-    if (originalRoomIds.has(roomId)) setDeletedRoomIds(prev => [...new Set([...prev, roomId])]);
-    setRoomDrafts(prev => prev.filter(room => room.id !== roomId));
-    setPositionDrafts(prev => prev.map(position => position.room_id === roomId ? { ...position, room_id: null } : position));
-  }
-
   function updatePosition(positionId: string, patch: Partial<SavedEstimatePosition>) {
     setPositionDrafts(prev => prev.map(position => {
       if (position.id !== positionId) return position;
@@ -479,27 +377,6 @@ export default function EstimatesPage({ auth, settings }: EstimatesPageProps) {
     setPositionDrafts(prev => prev.filter(position => position.id !== positionId));
   }
 
-  function recalcPricesFromMargin() {
-    setPositionDrafts(prev => prev.map(position => {
-      const basePrice = num(position.base_price ?? position.price);
-      const price = priceWithDraftMargin(basePrice);
-      const qty = num(position.qty);
-      return {
-        ...position,
-        price,
-        total: price * qty,
-        components_snapshot: componentSnapshots(position).map(component => {
-          const componentBasePrice = num(component.price);
-          const componentPrice = priceWithDraftMargin(componentBasePrice);
-          return {
-            ...component,
-            price: componentPrice,
-            total: componentPrice * num(component.qty),
-          };
-        }),
-      };
-    }));
-  }
 
   async function handleAddPosition() {
     if (!selectedEstimate) return;
@@ -881,14 +758,16 @@ export default function EstimatesPage({ auth, settings }: EstimatesPageProps) {
                                     {...params}
                                     label="Поиск в каталоге или своё название"
                                     placeholder="Начните вводить..."
-                                    InputProps={{
-                                      ...params.InputProps,
-                                      endAdornment: (
-                                        <>
-                                          {optionsLoading ? <CircularProgress color="inherit" size={20} /> : null}
-                                          {params.InputProps.endAdornment}
-                                        </>
-                                      ),
+                                    slotProps={{
+                                      input: {
+                                        ...params.slotProps?.input,
+                                        endAdornment: (
+                                          <>
+                                            {optionsLoading ? <CircularProgress color="inherit" size={20} /> : null}
+                                            {params.slotProps?.input?.endAdornment}
+                                          </>
+                                        ),
+                                      },
                                     }}
                                   />
                                 )}
@@ -927,7 +806,7 @@ export default function EstimatesPage({ auth, settings }: EstimatesPageProps) {
                                 value={addDraft.price}
                                 onChange={e => setAddDraft(prev => ({ ...prev, price: e.target.value }))}
                                 sx={{ width: { md: 150 } }}
-                                InputProps={{ endAdornment: <InputAdornment position="end">₽</InputAdornment> }}
+                                slotProps={{ input: { endAdornment: <InputAdornment position="end">₽</InputAdornment> } }}
                               />
                               <TextField
                                 label="Категория"
@@ -980,7 +859,6 @@ export default function EstimatesPage({ auth, settings }: EstimatesPageProps) {
 
                         <Stack spacing={1.5}>
                           {positionDrafts.map(position => {
-                            const components = componentSnapshots(position);
                             return (
                               <Box key={position.id} sx={{ p: 1.5, border: '1px solid', borderColor: 'divider', borderRadius: 1 }}>
                                 <Stack direction={{ xs: 'column', md: 'row' }} spacing={2} sx={{ alignItems: { md: 'center' } }}>
