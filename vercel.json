@@ -1,7 +1,8 @@
 {
   "version": 2,
   "framework": "vite",
-  "buildCommand": "npm install --prefix app --legacy-peer-deps && npm run build --prefix app",
+  "buildCommand": "npm run build --prefix app",
+  "installCommand": "npm install --prefix app --legacy-peer-deps",
   "outputDirectory": "app/dist",
   "rewrites": [
     {
