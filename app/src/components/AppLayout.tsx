@@ -60,19 +60,28 @@ export default function AppLayout({
     <Box sx={{ minHeight: '100vh', backgroundColor: 'background.default' }}>
       <MuiAppBar position="sticky" color="inherit">
         <Toolbar sx={{ gap: 2, minHeight: 76 }}>
-          <Avatar src={settings.avatarDataUrl || undefined} sx={{ bgcolor: 'primary.main' }}>
+          <Avatar src={settings.avatarDataUrl || undefined} sx={{ width: { xs: 32, sm: 40 }, height: { xs: 32, sm: 40 }, bgcolor: 'primary.main' }}>
             {settings.companyName.slice(0, 1)}
           </Avatar>
-          <Box sx={{ minWidth: 0 }}>
-            <Typography variant="h5" color="primary.main" sx={{ lineHeight: 1.1 }}>
+          <Box sx={{ minWidth: 0, flexShrink: 1 }}>
+            <Typography 
+              variant="h5" 
+              color="primary.main" 
+              noWrap 
+              sx={{ 
+                lineHeight: 1.1, 
+                fontSize: { xs: '1.1rem', sm: '1.5rem' },
+                fontWeight: 700 
+              }}
+            >
               {settings.companyName}
             </Typography>
-            <Typography variant="body2" color="text.secondary">
+            <Typography variant="body2" color="text.secondary" noWrap sx={{ display: { xs: 'none', sm: 'block' } }}>
               {auth.userEmail}
             </Typography>
           </Box>
 
-          <Box sx={{ display: 'flex', gap: 1, ml: 2 }}>
+          <Box sx={{ display: { xs: 'none', lg: 'flex' }, gap: 1, ml: 2 }}>
             {navLinks.map(link => (
               <Button
                 key={link.to}
@@ -82,6 +91,7 @@ export default function AppLayout({
                 sx={{
                   textTransform: 'none',
                   fontWeight: 600,
+                  whiteSpace: 'nowrap',
                   '&.active': {
                     color: 'primary.main',
                     borderBottom: '2px solid',
@@ -106,10 +116,10 @@ export default function AppLayout({
 
           <TextField
             size="small"
-            placeholder="Поиск по названию, ID, категории..."
+            placeholder="Поиск..."
             value={search}
             onChange={(event) => onSearchChange(event.target.value)}
-            sx={{ display: { xs: 'none', md: 'block' }, width: 360 }}
+            sx={{ display: { xs: 'none', md: 'block' }, width: { md: 200, lg: 300 } }}
             slotProps={{
               input: {
                 startAdornment: <InputAdornment position="start"><SearchIcon color="action" /></InputAdornment>
@@ -117,29 +127,31 @@ export default function AppLayout({
             }}
           />
 
-          <Tooltip title="Обновить каталог">
-            <IconButton color="primary" onClick={onRefresh}>
-              <RefreshIcon />
-            </IconButton>
-          </Tooltip>
+          <Stack direction="row" spacing={0.5}>
+            <Tooltip title="Обновить каталог">
+              <IconButton color="primary" onClick={onRefresh} size="small">
+                <RefreshIcon />
+              </IconButton>
+            </Tooltip>
 
-          <Tooltip title="Настройки компании и маржи">
-            <IconButton color="primary" onClick={onSettingsOpen}>
-              <SettingsIcon />
-            </IconButton>
-          </Tooltip>
+            <Tooltip title="Настройки и навигация">
+              <IconButton color="primary" onClick={onSettingsOpen} size="small">
+                <SettingsIcon />
+              </IconButton>
+            </Tooltip>
 
-          <Tooltip title="Выйти">
-            <IconButton color="primary" onClick={auth.logout}>
-              <LogoutIcon />
+            <IconButton color="primary" onClick={onCartOpen} size="small">
+              <Badge badgeContent={cartCount} color="error">
+                <CartIcon />
+              </Badge>
             </IconButton>
-          </Tooltip>
 
-          <IconButton color="primary" onClick={onCartOpen}>
-            <Badge badgeContent={cartCount} color="error">
-              <CartIcon />
-            </Badge>
-          </IconButton>
+            <Tooltip title="Выйти">
+              <IconButton color="primary" onClick={auth.logout} size="small" sx={{ display: { xs: 'none', sm: 'inline-flex' } }}>
+                <LogoutIcon />
+              </IconButton>
+            </Tooltip>
+          </Stack>
         </Toolbar>
       </MuiAppBar>
 
