@@ -4,6 +4,6 @@
   "private": true,
   "scripts": {
     "build": "npm run build --prefix app",
-    "install": "npm install --prefix app --legacy-peer-deps"
+    "postinstall": "npm install --prefix app --legacy-peer-deps"
   }
 }
