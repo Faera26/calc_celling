@@ -7,6 +7,7 @@ import {
   Chip,
   IconButton,
   InputAdornment,
+  Stack,
   TextField,
   Toolbar,
   Tooltip,
