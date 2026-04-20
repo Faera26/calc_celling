@@ -18,6 +18,8 @@ import {
   Switch,
   TextField,
   Typography,
+  Autocomplete,
+  InputAdornment,
 } from '@mui/material';
 import {
   Add as AddIcon,
@@ -40,6 +42,8 @@ import type {
 import { generatePdf } from '../PdfExport';
 import { adjustedPrice, labelOf, money } from '../utils';
 import { restDelete, restInsert, restSelect, restUpdate } from '../supabaseRest';
+import { supabase } from '../supabaseClient';
+import { cleanSearch, formatError, withTimeout } from '../utils';
 
 interface EstimatesPageProps {
   auth: AuthState;
@@ -68,7 +72,11 @@ interface AddLocalPositionDraft {
   qty: string;
   unit: string;
   description: string;
+  image: string;
   roomId: string;
+  item_id?: string;
+  category?: string;
+  subcategory?: string;
 }
 
 const COMMON_ROOM = 'common';
@@ -180,7 +188,10 @@ function emptyAddDraft(): AddLocalPositionDraft {
     qty: '1',
     unit: 'шт.',
     description: '',
+    image: '',
     roomId: COMMON_ROOM,
+    category: 'Локальные',
+    subcategory: '',
   };
 }
 
@@ -194,12 +205,51 @@ export default function EstimatesPage({ auth, settings }: EstimatesPageProps) {
   const [positionDrafts, setPositionDrafts] = useState<SavedEstimatePosition[]>([]);
   const [deletedRoomIds, setDeletedRoomIds] = useState<string[]>([]);
   const [deletedPositionIds, setDeletedPositionIds] = useState<string[]>([]);
+  const [pdfLoading, setPdfLoading] = useState(false);
+
+  // Catalog search for adding positions
+  const [catalogSearch, setCatalogSearch] = useState('');
+  const [catalogOptions, setCatalogOptions] = useState<any[]>([]);
+  const [optionsLoading, setOptionsLoading] = useState(false);
+
+  // Debounce catalog search
+  useEffect(() => {
+    if (catalogSearch.length < 2) {
+      setCatalogOptions([]);
+      return;
+    }
+
+    const timer = window.setTimeout(async () => {
+      setOptionsLoading(true);
+      try {
+        const query = cleanSearch(catalogSearch);
+        const [tovary, uslugi, uzly] = await Promise.all([
+          supabase.from('tovary').select('id, name, price, unit, category, subcategory').ilike('name', `%${query}%`).limit(10),
+          supabase.from('uslugi').select('id, name, price, unit, category, subcategory').ilike('name', `%${query}%`).limit(10),
+          supabase.from('uzly').select('id, name, price, unit, category, subcategory').ilike('name', `%${query}%`).limit(10),
+        ]);
+
+        const combined = [
+          ...(tovary.data || []).map(x => ({ ...x, type: 'tovar' })),
+          ...(uslugi.data || []).map(x => ({ ...x, type: 'usluga' })),
+          ...(uzly.data || []).map(x => ({ ...x, type: 'uzel' })),
+        ];
+        setCatalogOptions(combined);
+      } catch (err) {
+        console.error('Search error:', err);
+      } finally {
+        setOptionsLoading(false);
+      }
+    }, 400);
+
+    return () => window.clearTimeout(timer);
+  }, [catalogSearch]);
   const [loading, setLoading] = useState(true);
   const [detailsLoading, setDetailsLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
-  const [addLocalDraft, setAddLocalDraft] = useState<AddLocalPositionDraft>(() => emptyAddDraft());
+  const [addDraft, setAddDraft] = useState<AddLocalPositionDraft>(() => emptyAddDraft());
   const [editingPositionId, setEditingPositionId] = useState<string | null>(null);
 
   const selectedEstimate = useMemo(
@@ -248,10 +298,6 @@ export default function EstimatesPage({ auth, settings }: EstimatesPageProps) {
 
   const originalRoomIds = useMemo(() => new Set(rooms.map(room => room.id)), [rooms]);
   const originalPositionIds = useMemo(() => new Set(positions.map(position => position.id)), [positions]);
-
-
-
-
 
   function sectionNameOf(roomId?: string | null) {
     if (roomId && roomNameById.has(roomId)) return roomNameById.get(roomId)!;
@@ -374,10 +420,6 @@ export default function EstimatesPage({ auth, settings }: EstimatesPageProps) {
     return () => { cancelled = true; };
   }, [selectedEstimate?.id]);
 
-
-
-
-
   function updateRoom(roomId: string, patch: Partial<SavedEstimateRoom>) {
     setRoomDrafts(prev => prev.map(room => room.id === roomId ? { ...room, ...patch } : room));
   }
@@ -437,7 +479,6 @@ export default function EstimatesPage({ auth, settings }: EstimatesPageProps) {
     setPositionDrafts(prev => prev.filter(position => position.id !== positionId));
   }
 
-
   function recalcPricesFromMargin() {
     setPositionDrafts(prev => prev.map(position => {
       const basePrice = num(position.base_price ?? position.price);
@@ -460,14 +501,12 @@ export default function EstimatesPage({ auth, settings }: EstimatesPageProps) {
     }));
   }
 
-
-
-  async function addLocalPosition() {
+  async function handleAddPosition() {
     if (!selectedEstimate) return;
     
-    const qty = num(addLocalDraft.qty) || 1;
-    const price = num(addLocalDraft.price) || 0;
-    const name = addLocalDraft.name.trim();
+    const qty = num(addDraft.qty) || 1;
+    const price = num(addDraft.price) || 0;
+    const name = addDraft.name.trim();
 
     if (!name) {
       setError('Введите название позиции');
@@ -478,20 +517,20 @@ export default function EstimatesPage({ auth, settings }: EstimatesPageProps) {
       id: crypto.randomUUID(),
       smeta_id: selectedEstimate.id,
       position_index: positionDrafts.length + 1,
-      room_id: addLocalDraft.roomId === COMMON_ROOM ? null : addLocalDraft.roomId,
+      room_id: addDraft.roomId === COMMON_ROOM ? null : addDraft.roomId,
       item_type: 'tovar',
-      item_id: `local-${crypto.randomUUID()}`,
+      item_id: addDraft.item_id || `local-${crypto.randomUUID()}`,
       item_name: name,
       qty,
-      unit: addLocalDraft.unit.trim() || 'шт.',
+      unit: addDraft.unit.trim() || 'шт.',
       base_price: price,
       price,
       total: price * qty,
-      category: 'Локальные',
-      subcategory: null,
+      category: addDraft.category || 'Локальные',
+      subcategory: addDraft.subcategory || null,
       source_snapshot: {
-        image: null,
-        description: addLocalDraft.description.trim() || null,
+        image: addDraft.image.trim() || null,
+        description: addDraft.description.trim() || null,
         source: 'local',
       },
       components_snapshot: [],
@@ -532,14 +571,12 @@ export default function EstimatesPage({ auth, settings }: EstimatesPageProps) {
 
       setPositions(prev => [...prev, position]);
       setPositionDrafts(nextPositions);
-      setAddLocalDraft(emptyAddDraft());
+      setAddDraft(emptyAddDraft());
       setNotice('Позиция успешно добавлена.');
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     }
   }
-
-
 
   async function saveEstimateEditor() {
     if (!selectedEstimate) return;
@@ -718,7 +755,7 @@ export default function EstimatesPage({ auth, settings }: EstimatesPageProps) {
         <Box>
           <Typography variant="h4">Сметы</Typography>
           <Typography color="text.secondary" sx={{ mt: 0.5 }}>
-            Редактор сохранённых смет: клиент, комнаты, общие работы, позиции и состав узлов.
+            Редактор сохранённых смет.
           </Typography>
         </Box>
         <Button variant="outlined" startIcon={<RefreshIcon />} onClick={loadEstimates} disabled={loading}>
@@ -738,9 +775,6 @@ export default function EstimatesPage({ auth, settings }: EstimatesPageProps) {
         <Card>
           <CardContent>
             <Alert severity="info" sx={{ mb: 2 }}>Пока нет сохранённых смет.</Alert>
-            <Typography color="text.secondary">
-              Собери позиции в правой панели “Смета”, нажми “Сохранить смету” и заполни клиента с комнатами.
-            </Typography>
           </CardContent>
         </Card>
       ) : (
@@ -762,13 +796,12 @@ export default function EstimatesPage({ auth, settings }: EstimatesPageProps) {
                   <Stack spacing={1}>
                     <Stack direction="row" sx={{ alignItems: 'center', justifyContent: 'space-between', gap: 1 }}>
                       <Typography variant="h6">{estimate.title || estimate.client_name || 'Без названия'}</Typography>
-                      <Chip size="small" label={statusLabels[estimate.status] || estimate.status} />
                     </Stack>
                     <Typography color="text.secondary">{estimate.client_name || 'Клиент не указан'}</Typography>
                     <Typography variant="body2" color="text.secondary">{formatDate(estimate.created_at)}</Typography>
                     <Stack direction="row" sx={{ justifyContent: 'space-between' }}>
                       <Typography variant="body2" color="text.secondary">
-                        Комнат: {estimate.room_count || 0} · позиций: {estimate.items_count || 0}
+                        {estimate.items_count || 0} поз.
                       </Typography>
                       <Typography sx={{ fontWeight: 700 }}>{money(num(estimate.total))}</Typography>
                     </Stack>
@@ -785,26 +818,15 @@ export default function EstimatesPage({ auth, settings }: EstimatesPageProps) {
                   <Stack direction={{ xs: 'column', md: 'row' }} sx={{ justifyContent: 'space-between', gap: 2, mb: 2 }}>
                     <Box>
                       <Typography variant="h5">{estimateDraft.title || estimateDraft.clientName || 'Без названия'}</Typography>
-                      <Typography color="text.secondary">
-                        {estimateDraft.clientName || 'Клиент не указан'} · {estimateDraft.clientPhone || 'телефон не указан'}
-                      </Typography>
-                      <Typography variant="body2" color="text.secondary">
-                        Создано: {formatDate(selectedEstimate.created_at)}
-                      </Typography>
-                    </Box>
-                    <Stack spacing={1} sx={{ alignItems: { md: 'flex-end' } }}>
                       <Typography variant="h4" color="primary.main">{money(currentTotal)}</Typography>
-                      <Typography variant="body2" color="text.secondary">
-                        Комнат: {roomDrafts.length} · позиций: {positionDrafts.length} · компонентов узлов: {componentsCount}
-                      </Typography>
-                      <Stack direction="row" spacing={1}>
-                        <Button variant="outlined" startIcon={<PdfIcon />} disabled={positionDrafts.length === 0} onClick={handlePdfExport}>
-                          PDF
-                        </Button>
-                        <Button variant="contained" startIcon={<SaveIcon />} disabled={saving || detailsLoading} onClick={saveEstimateEditor}>
-                          {saving ? 'Сохраняю...' : 'Сохранить изменения'}
-                        </Button>
-                      </Stack>
+                    </Box>
+                    <Stack direction="row" spacing={1}>
+                      <Button variant="outlined" startIcon={<PdfIcon />} disabled={positionDrafts.length === 0} onClick={handlePdfExport}>
+                        PDF
+                      </Button>
+                      <Button variant="contained" startIcon={<SaveIcon />} disabled={saving || detailsLoading} onClick={saveEstimateEditor}>
+                        {saving ? 'Сохраняю...' : 'Сохранить изменения'}
+                      </Button>
                     </Stack>
                   </Stack>
 
@@ -817,191 +839,125 @@ export default function EstimatesPage({ auth, settings }: EstimatesPageProps) {
                     </Stack>
                   ) : (
                     <Stack spacing={3}>
-                      <Box>
-                        <Typography variant="h6" sx={{ mb: 2 }}>Данные сметы</Typography>
-                        <Stack direction={{ xs: 'column', md: 'row' }} spacing={2} sx={{ mb: 2 }}>
-                          <TextField label="Название" value={estimateDraft.title} onChange={event => setEstimateDraft(prev => ({ ...prev, title: event.target.value }))} fullWidth />
-                          <TextField select label="Статус" value={estimateDraft.status} onChange={event => setEstimateDraft(prev => ({ ...prev, status: event.target.value as SavedEstimate['status'] }))} sx={{ minWidth: 180 }}>
-                            <MenuItem value="draft">Черновик</MenuItem>
-                            <MenuItem value="sent">Отправлено</MenuItem>
-                            <MenuItem value="accepted">Принято</MenuItem>
-                            <MenuItem value="archived">Архив</MenuItem>
-                          </TextField>
-                          <Stack direction="row" sx={{ alignItems: 'center', minWidth: 250 }}>
-                            <Switch
-                              checked={estimateDraft.documentType === 'final'}
-                              onChange={event => setEstimateDraft(prev => ({
-                                ...prev,
-                                documentType: event.target.checked ? 'final' : 'preliminary',
-                              }))}
-                            />
-                            <Typography>{estimateDraft.documentType === 'final' ? 'Итоговый расчет' : 'Предварительная смета'}</Typography>
-                          </Stack>
-                        </Stack>
-                        <Stack direction={{ xs: 'column', md: 'row' }} spacing={2} sx={{ mb: 2 }}>
-                          <TextField label="Клиент" value={estimateDraft.clientName} onChange={event => setEstimateDraft(prev => ({ ...prev, clientName: event.target.value }))} fullWidth />
-                          <TextField label="Телефон" value={estimateDraft.clientPhone} onChange={event => setEstimateDraft(prev => ({ ...prev, clientPhone: event.target.value }))} fullWidth />
-                          <TextField label="Email" value={estimateDraft.clientEmail} onChange={event => setEstimateDraft(prev => ({ ...prev, clientEmail: event.target.value }))} fullWidth />
-                        </Stack>
-                        <TextField label="Адрес объекта" value={estimateDraft.objectAddress} onChange={event => setEstimateDraft(prev => ({ ...prev, objectAddress: event.target.value }))} fullWidth sx={{ mb: 2 }} />
-                        <TextField label="Комментарий" value={estimateDraft.clientComment} onChange={event => setEstimateDraft(prev => ({ ...prev, clientComment: event.target.value }))} multiline minRows={2} fullWidth />
-                        <Stack direction={{ xs: 'column', md: 'row' }} spacing={2} sx={{ mt: 2, alignItems: { md: 'center' } }}>
-                          <TextField label="Маржа, %" type="number" value={estimateDraft.marginPercent} onChange={event => setEstimateDraft(prev => ({ ...prev, marginPercent: event.target.value }))} />
-                          <TextField label="Скидка, %" type="number" value={estimateDraft.discountPercent} onChange={event => setEstimateDraft(prev => ({ ...prev, discountPercent: event.target.value }))} />
-                          <Button variant="outlined" onClick={recalcPricesFromMargin}>Пересчитать цены по марже</Button>
-                          <Stack direction="row" sx={{ alignItems: 'center' }}>
-                            <Switch checked={estimateDraft.useCommonSection} onChange={event => setEstimateDraft(prev => ({ ...prev, useCommonSection: event.target.checked }))} />
-                            <Typography>Общие работы</Typography>
-                          </Stack>
-                        </Stack>
-                        <Box sx={{ mt: 3 }}>
-                          <Typography variant="h6" sx={{ mb: 1 }}>Шаблон PDF</Typography>
-                          <Stack direction={{ xs: 'column', md: 'row' }} spacing={1.5}>
-                            {pdfTemplates.map(template => {
-                              const active = estimateDraft.pdfTemplate === template.value;
-                              return (
-                                <Box
-                                  key={template.value}
-                                  onClick={() => setEstimateDraft(prev => ({ ...prev, pdfTemplate: template.value }))}
-                                  sx={{
-                                    flex: 1,
-                                    p: 1.5,
-                                    border: '1px solid',
-                                    borderColor: active ? estimateDraft.pdfAccentColor : 'divider',
-                                    borderRadius: 1,
-                                    cursor: 'pointer',
-                                    backgroundColor: active ? '#F8FAFC' : 'transparent',
-                                  }}
-                                >
-                                  <Typography sx={{ fontWeight: 700 }}>{template.label}</Typography>
-                                  <Typography variant="body2" color="text.secondary">{template.hint}</Typography>
-                                </Box>
-                              );
-                            })}
-                          </Stack>
-
-                          <Typography variant="subtitle1" sx={{ mt: 2, mb: 1 }}>Цвет элементов сметы</Typography>
-                          <Stack direction="row" spacing={1} sx={{ flexWrap: 'wrap', rowGap: 1 }}>
-                            {pdfPalette.map(color => {
-                              const active = (estimateDraft.pdfAccentColor || '#D4146A').toLowerCase() === color.toLowerCase();
-                              return (
-                                <Box
-                                  key={color}
-                                  onClick={() => setEstimateDraft(prev => ({ ...prev, pdfAccentColor: color }))}
-                                  sx={{
-                                    width: 42,
-                                    height: 42,
-                                    borderRadius: 1,
-                                    backgroundColor: color,
-                                    border: '3px solid',
-                                    borderColor: active ? 'primary.main' : 'transparent',
-                                    boxShadow: active ? '0 0 0 2px #fff inset' : 'none',
-                                    cursor: 'pointer',
-                                  }}
-                                />
-                              );
-                            })}
-                            <TextField
-                              label="Свой цвет"
-                              type="color"
-                              value={estimateDraft.pdfAccentColor || '#D4146A'}
-                              onChange={event => setEstimateDraft(prev => ({ ...prev, pdfAccentColor: event.target.value }))}
-                              sx={{ width: 120 }}
-                            />
-                          </Stack>
-                        </Box>
-                      </Box>
-
-                      <Divider />
-
-                      <Box>
-                        <Stack direction={{ xs: 'column', sm: 'row' }} sx={{ justifyContent: 'space-between', alignItems: { sm: 'center' }, gap: 1, mb: 2 }}>
-                          <Box>
-                            <Typography variant="h6">Итоги по разделам</Typography>
-                            <Typography variant="body2" color="text.secondary">Смета сразу видна по комнатам, по общим работам и общим итогом.</Typography>
-                          </Box>
-                          <Typography variant="h5" color="primary.main">{money(currentTotal)}</Typography>
-                        </Stack>
-                        <Stack direction={{ xs: 'column', md: 'row' }} spacing={1.5}>
-                          {sectionTotals.map(section => (
-                            <Box key={section.key} sx={{ flex: 1, minWidth: 180, p: 1.5, border: '1px solid', borderColor: 'divider', borderRadius: 1 }}>
-                              <Typography sx={{ fontWeight: 700 }}>{section.name}</Typography>
-                              <Typography variant="body2" color="text.secondary">{section.count} поз.</Typography>
-                              <Typography variant="h6">{money(section.total)}</Typography>
-                            </Box>
-                          ))}
-                        </Stack>
-                      </Box>
-
-                      <Divider />
-
-                      <Box>
-                        <Stack direction={{ xs: 'column', sm: 'row' }} sx={{ justifyContent: 'space-between', alignItems: { sm: 'center' }, gap: 1, mb: 2 }}>
-                          <Box>
-                            <Typography variant="h6">Комнаты</Typography>
-                            <Typography variant="body2" color="text.secondary">Площадь, периметр и параметры потолка округляем/храним с точностью до 0.1.</Typography>
-                          </Box>
-                          <Button variant="outlined" startIcon={<AddIcon />} onClick={addRoom}>Добавить комнату</Button>
-                        </Stack>
-                        <Stack spacing={2}>
-                          {roomDrafts.map((room, index) => (
-                            <Box key={room.id} sx={{ p: 2, border: '1px solid', borderColor: 'divider', borderRadius: 1 }}>
-                              <Stack direction="row" sx={{ alignItems: 'center', justifyContent: 'space-between', mb: 2 }}>
-                                <Typography variant="subtitle1">Комната {index + 1}</Typography>
-                                <IconButton color="error" onClick={() => removeRoom(room.id)}><DeleteIcon /></IconButton>
-                              </Stack>
-                              <Stack direction={{ xs: 'column', md: 'row' }} spacing={2} sx={{ mb: 2 }}>
-                                <TextField label="Название" value={room.name} onChange={event => updateRoom(room.id, { name: event.target.value })} fullWidth />
-                                <TextField label="Площадь, м²" type="number" value={room.area} onChange={event => updateRoom(room.id, { area: num(event.target.value) })} />
-                                <TextField label="Периметр, м" type="number" value={room.perimeter} onChange={event => updateRoom(room.id, { perimeter: num(event.target.value) })} />
-                                <TextField label="Углы" type="number" value={room.corners} onChange={event => updateRoom(room.id, { corners: num(event.target.value) })} />
-                              </Stack>
-                              <Stack direction={{ xs: 'column', md: 'row' }} spacing={2}>
-                                <TextField label="Встроенные/накладные/люстры, шт." type="number" value={room.light_points} onChange={event => updateRoom(room.id, { light_points: num(event.target.value) })} />
-                                <TextField label="Трубы, шт." type="number" value={room.pipes} onChange={event => updateRoom(room.id, { pipes: num(event.target.value) })} />
-                                <TextField label="Карниз, м" type="number" value={room.curtain_tracks} onChange={event => updateRoom(room.id, { curtain_tracks: num(event.target.value) })} />
-                                <TextField label="Ниши, м" type="number" value={room.niches} onChange={event => updateRoom(room.id, { niches: num(event.target.value) })} />
-                              </Stack>
-                              <TextField label="Заметка" value={room.comment || ''} onChange={event => updateRoom(room.id, { comment: event.target.value })} fullWidth sx={{ mt: 2 }} />
-                            </Box>
-                          ))}
-                        </Stack>
-                      </Box>
-
-
-
-                      <Box>
-                        <Typography variant="h6" sx={{ mb: 2 }}>Добавить позицию</Typography>
-                        <Stack spacing={2}>
-                          <Stack direction={{ xs: 'column', md: 'row' }} spacing={2}>
-                            <TextField label="Название позиции" value={addLocalDraft.name} onChange={e => setAddLocalDraft(prev => ({ ...prev, name: e.target.value }))} fullWidth />
-                            <TextField select label="Раздел" value={addLocalDraft.roomId} onChange={event => setAddLocalDraft(prev => ({ ...prev, roomId: event.target.value }))} sx={{ minWidth: 220 }}>
-                              {estimateDraft.useCommonSection && <MenuItem value={COMMON_ROOM}>Общие работы</MenuItem>}
-                              {roomDrafts.map(room => <MenuItem key={room.id} value={room.id}>{room.name}</MenuItem>)}
-                            </TextField>
-                          </Stack>
-                          <Stack direction={{ xs: 'column', md: 'row' }} spacing={2}>
-                            <TextField label="Цена" type="number" value={addLocalDraft.price} onChange={e => setAddLocalDraft(prev => ({ ...prev, price: e.target.value }))} sx={{ width: { md: 150 } }} />
-                            <TextField label="Кол-во" type="number" value={addLocalDraft.qty} onChange={event => setAddLocalDraft(prev => ({ ...prev, qty: event.target.value }))} sx={{ width: { md: 130 } }} />
-                            <TextField label="Ед. изм." value={addLocalDraft.unit} onChange={e => setAddLocalDraft(prev => ({ ...prev, unit: e.target.value }))} sx={{ width: { md: 120 } }} />
-                            <TextField label="Описание (опционально)" value={addLocalDraft.description} onChange={e => setAddLocalDraft(prev => ({ ...prev, description: e.target.value }))} fullWidth />
-                          </Stack>
-                          <Button variant="contained" startIcon={<AddIcon />} onClick={addLocalPosition} disabled={!addLocalDraft.name.trim()} sx={{ width: { xs: '100%', md: 'max-content' } }}>
-                            Добавить локальную позицию
-                          </Button>
-                        </Stack>
-                      </Box>
-
-                      <Divider />
-
+                      {/* Позиции сметы */}
                       <Box>
                         <Stack direction={{ xs: 'column', sm: 'row' }} sx={{ justifyContent: 'space-between', alignItems: { sm: 'center' }, gap: 1, mb: 2 }}>
                           <Box>
                             <Typography variant="h6">Позиции сметы</Typography>
                             <Typography variant="body2" color="text.secondary">Можно вручную менять количество, цену, единицу и раздел.</Typography>
                           </Box>
-                          <Typography variant="h5" color="primary.main">{money(currentTotal)}</Typography>
                         </Stack>
+
+                        {/* Блок добавления позиции */}
+                        <Box sx={{ mb: 4, p: 2.5, bgcolor: 'primary.50', borderRadius: 3, border: '1px solid', borderColor: 'primary.100' }}>
+                          <Typography variant="subtitle1" sx={{ fontWeight: 700, mb: 2, color: 'primary.dark' }}>Добавить позицию</Typography>
+                          <Stack spacing={2}>
+                            <Stack direction={{ xs: 'column', md: 'row' }} spacing={2}>
+                              <Autocomplete
+                                fullWidth
+                                options={catalogOptions}
+                                loading={optionsLoading}
+                                getOptionLabel={(option) => typeof option === 'string' ? option : option.name}
+                                onInputChange={(_, value) => {
+                                  setCatalogSearch(value);
+                                  setAddDraft(prev => ({ ...prev, name: value }));
+                                }}
+                                onChange={(_, newValue) => {
+                                  if (newValue && typeof newValue !== 'string') {
+                                    setAddDraft(prev => ({
+                                      ...prev,
+                                      name: newValue.name,
+                                      price: String(newValue.price || ''),
+                                      unit: newValue.unit || 'шт.',
+                                      item_id: newValue.id,
+                                      category: newValue.category,
+                                      subcategory: newValue.subcategory,
+                                    }));
+                                  }
+                                }}
+                                freeSolo
+                                renderInput={(params) => (
+                                  <TextField
+                                    {...params}
+                                    label="Поиск в каталоге или своё название"
+                                    placeholder="Начните вводить..."
+                                    InputProps={{
+                                      ...params.InputProps,
+                                      endAdornment: (
+                                        <>
+                                          {optionsLoading ? <CircularProgress color="inherit" size={20} /> : null}
+                                          {params.InputProps.endAdornment}
+                                        </>
+                                      ),
+                                    }}
+                                  />
+                                )}
+                              />
+                              <TextField
+                                select
+                                label="Раздел"
+                                value={addDraft.roomId}
+                                onChange={e => setAddDraft(prev => ({ ...prev, roomId: e.target.value }))}
+                                sx={{ minWidth: 200 }}
+                              >
+                                {estimateDraft.useCommonSection && <MenuItem value={COMMON_ROOM}>Общие работы</MenuItem>}
+                                {roomDrafts.map(room => (
+                                  <MenuItem key={room.id} value={room.id}>{room.name}</MenuItem>
+                                ))}
+                              </TextField>
+                            </Stack>
+
+                            <Stack direction={{ xs: 'column', md: 'row' }} spacing={2}>
+                              <TextField
+                                label="Кол-во"
+                                type="number"
+                                value={addDraft.qty}
+                                onChange={e => setAddDraft(prev => ({ ...prev, qty: e.target.value }))}
+                                sx={{ width: { md: 120 } }}
+                              />
+                              <TextField
+                                label="Ед. изм."
+                                value={addDraft.unit}
+                                onChange={e => setAddDraft(prev => ({ ...prev, unit: e.target.value }))}
+                                sx={{ width: { md: 100 } }}
+                              />
+                              <TextField
+                                label="Цена"
+                                type="number"
+                                value={addDraft.price}
+                                onChange={e => setAddDraft(prev => ({ ...prev, price: e.target.value }))}
+                                sx={{ width: { md: 150 } }}
+                                InputProps={{ endAdornment: <InputAdornment position="end">₽</InputAdornment> }}
+                              />
+                              <TextField
+                                label="Описание"
+                                value={addDraft.description}
+                                onChange={e => setAddDraft(prev => ({ ...prev, description: e.target.value }))}
+                                fullWidth
+                                placeholder="Доп. информация для сметы"
+                              />
+                            </Stack>
+
+                            <Stack direction={{ xs: 'column', md: 'row' }} spacing={2} sx={{ alignItems: 'center' }}>
+                              <TextField
+                                label="URL картинки"
+                                value={addDraft.image}
+                                onChange={e => setAddDraft(prev => ({ ...prev, image: e.target.value }))}
+                                fullWidth
+                                placeholder="Ссылка на фото для локальной позиции"
+                              />
+                              <Button
+                                variant="contained"
+                                size="large"
+                                onClick={handleAddPosition}
+                                startIcon={<AddIcon />}
+                                sx={{ height: 56, px: 4, borderRadius: 2, flexShrink: 0 }}
+                              >
+                                Добавить
+                              </Button>
+                            </Stack>
+                          </Stack>
+                        </Box>
 
                         <Stack spacing={1.5}>
                           {positionDrafts.map(position => {
@@ -1010,21 +966,14 @@ export default function EstimatesPage({ auth, settings }: EstimatesPageProps) {
                               <Box key={position.id} sx={{ p: 1.5, border: '1px solid', borderColor: 'divider', borderRadius: 1 }}>
                                 <Stack direction={{ xs: 'column', md: 'row' }} spacing={2} sx={{ alignItems: { md: 'center' } }}>
                                   <Box sx={{ flexGrow: 1, minWidth: 0 }}>
-                                    <Stack direction="row" spacing={1} sx={{ mb: 0.5, alignItems: 'center' }}>
-                                      <Chip size="small" label={labelOf(position.item_type)} />
-                                      <Typography variant="body2" color="text.secondary">
-                                        ID {position.item_id}
-                                      </Typography>
-                                    </Stack>
                                     <Typography sx={{ fontWeight: 700 }}>{position.item_name}</Typography>
-                                    <Typography variant="body2" color="text.secondary">
-                                      Раздел: {position.room_id ? roomNameById.get(position.room_id) : 'Общие работы'} · {position.category || 'Без категории'} / {position.subcategory || 'Без подкатегории'}
+                                    <Typography variant="caption" color="text.secondary">
+                                      Раздел: {position.room_id ? roomNameById.get(position.room_id) : 'Общие работы'}
                                     </Typography>
                                   </Box>
                                   
                                   <Box sx={{ textAlign: { md: 'right' } }}>
-                                    <Typography variant="body2" color="text.secondary">Кол-во: {position.qty} {position.unit}</Typography>
-                                    <Typography variant="body2" color="text.secondary">Цена: {money(num(position.price))}</Typography>
+                                    <Typography variant="body2" color="text.secondary">{position.qty} {position.unit} × {money(num(position.price))}</Typography>
                                     <Typography sx={{ fontWeight: 700, fontSize: '1.1rem' }}>{money(num(position.total))}</Typography>
                                   </Box>
 
@@ -1037,22 +986,6 @@ export default function EstimatesPage({ auth, settings }: EstimatesPageProps) {
                                     </IconButton>
                                   </Stack>
                                 </Stack>
-
-                                {components.length > 0 && (
-                                  <Box sx={{ mt: 1.5, p: 1.25, backgroundColor: '#F8FAFC', borderRadius: 1 }}>
-                                    <Typography variant="body2" sx={{ fontWeight: 700, mb: 0.75 }}>Состав узла · {components.length} поз.</Typography>
-                                    <Stack spacing={0.5}>
-                                      {components.map((component, componentIndex) => (
-                                        <Stack key={`${component.item_id}-${componentIndex}`} direction="row" sx={{ justifyContent: 'space-between', gap: 1 }}>
-                                          <Typography variant="body2" sx={{ minWidth: 0 }}>{componentLabel(component.item_type)}: {component.item_name}</Typography>
-                                          <Typography variant="body2" sx={{ whiteSpace: 'nowrap', textAlign: 'right' }}>
-                                            {num(component.qty)} {component.unit || 'шт.'} × {money(num(component.price))} = {money(num(component.total))}
-                                          </Typography>
-                                        </Stack>
-                                      ))}
-                                    </Stack>
-                                  </Box>
-                                )}
                               </Box>
                             );
                           })}
