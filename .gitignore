@@ -1,0 +1,7 @@
+app/node_modules/
+app/dist/
+app/dist-ssr/
+app/*.local
+app/.env
+.agents/
+*.md
