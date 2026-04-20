@@ -930,11 +930,30 @@ export default function EstimatesPage({ auth, settings }: EstimatesPageProps) {
                                 InputProps={{ endAdornment: <InputAdornment position="end">₽</InputAdornment> }}
                               />
                               <TextField
+                                label="Категория"
+                                value={addDraft.category}
+                                onChange={e => setAddDraft(prev => ({ ...prev, category: e.target.value }))}
+                                fullWidth
+                                placeholder="Например: Потолки, Освещение"
+                              />
+                              <TextField
+                                label="Подкатегория"
+                                value={addDraft.subcategory}
+                                onChange={e => setAddDraft(prev => ({ ...prev, subcategory: e.target.value }))}
+                                fullWidth
+                                placeholder="Например: ПВХ, Споты"
+                              />
+                            </Stack>
+
+                            <Stack direction={{ xs: 'column', md: 'row' }} spacing={2}>
+                              <TextField
                                 label="Описание"
                                 value={addDraft.description}
                                 onChange={e => setAddDraft(prev => ({ ...prev, description: e.target.value }))}
                                 fullWidth
-                                placeholder="Доп. информация для сметы"
+                                multiline
+                                maxRows={3}
+                                placeholder="Доп. информация для сметы (появится в PDF)"
                               />
                             </Stack>
 
@@ -967,9 +986,16 @@ export default function EstimatesPage({ auth, settings }: EstimatesPageProps) {
                                 <Stack direction={{ xs: 'column', md: 'row' }} spacing={2} sx={{ alignItems: { md: 'center' } }}>
                                   <Box sx={{ flexGrow: 1, minWidth: 0 }}>
                                     <Typography sx={{ fontWeight: 700 }}>{position.item_name}</Typography>
-                                    <Typography variant="caption" color="text.secondary">
-                                      Раздел: {position.room_id ? roomNameById.get(position.room_id) : 'Общие работы'}
-                                    </Typography>
+                                    <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
+                                      <Typography variant="caption" color="text.secondary">
+                                        Раздел: {position.room_id ? roomNameById.get(position.room_id) : 'Общие работы'}
+                                      </Typography>
+                                      <Divider orientation="vertical" flexItem sx={{ height: 10, my: 'auto' }} />
+                                      <Typography variant="caption" color="primary.main" sx={{ fontWeight: 600 }}>
+                                        {position.category || 'Без категории'}
+                                        {position.subcategory ? ` / ${position.subcategory}` : ''}
+                                      </Typography>
+                                    </Stack>
                                   </Box>
                                   
                                   <Box sx={{ textAlign: { md: 'right' } }}>
