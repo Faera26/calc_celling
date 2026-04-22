@@ -2,6 +2,11 @@
   "name": "calc-ceiling-root",
   "version": "1.0.0",
   "private": true,
+  "devDependencies": {
+    "next": "^15.0.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  },
   "scripts": {
     "build": "npm run build --prefix app",
     "postinstall": "npm install --prefix app --legacy-peer-deps"
