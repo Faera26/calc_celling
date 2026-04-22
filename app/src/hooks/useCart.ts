@@ -1,46 +1,33 @@
 import { useMemo, useState } from 'react';
 import type { CatalogItem, CatalogType, CartEntry, CartRow, CompanySettings } from '../types';
-import { adjustedPrice, keyOf, normalizeItem } from '../utils';
+import { keyOf, normalizeItem } from '../utils';
+import { buildCartRows, calculateCartCount, calculateCartSubtotal } from '../features/cart/cartMath';
 
 export function useCart(settings: CompanySettings) {
   const [cart, setCart] = useState<Record<string, CartEntry>>({});
   const [isCartOpen, setIsCartOpen] = useState(false);
 
-  const cartRows: CartRow[] = useMemo(() => {
-    return Object.entries(cart).map(([cartKey, entry]) => {
-      const price = adjustedPrice(entry.item.price, settings);
-      return {
-        cartKey,
-        type: entry.type,
-        item: entry.item,
-        qty: entry.qty,
-        price,
-        total: price * entry.qty,
-        components: entry.components
-      };
-    });
-  }, [cart, settings]);
-
-  const subtotal = cartRows.reduce((sum, row) => sum + row.total, 0);
-  const cartCount = Object.values(cart).reduce((sum, entry) => sum + entry.qty, 0);
+  const cartRows: CartRow[] = useMemo(() => buildCartRows(cart, settings), [cart, settings]);
+  const subtotal = calculateCartSubtotal(cartRows);
+  const cartCount = calculateCartCount(cart);
 
   function addToCart(type: CatalogType, item: CatalogItem, components?: CartEntry['components']) {
     const cartKey = keyOf(type, item.id);
     const normalized = normalizeItem(item);
 
-    setCart(prev => {
+    setCart((prev) => {
       const current = prev[cartKey];
       return {
         ...prev,
         [cartKey]: current
           ? { ...current, item: normalized, qty: current.qty + 1, components: components || current.components }
-          : { type, item: normalized, qty: 1, components }
+          : { type, item: normalized, qty: 1, components },
       };
     });
   }
 
   function removeFromCart(cartKey: string) {
-    setCart(prev => {
+    setCart((prev) => {
       const current = prev[cartKey];
       if (!current) return prev;
 
@@ -57,11 +44,11 @@ export function useCart(settings: CompanySettings) {
   }
 
   function updateCartItem(cartKey: string, item: CatalogItem) {
-    setCart(prev => {
+    setCart((prev) => {
       if (!prev[cartKey]) return prev;
       return {
         ...prev,
-        [cartKey]: { ...prev[cartKey], item }
+        [cartKey]: { ...prev[cartKey], item },
       };
     });
   }
@@ -76,6 +63,6 @@ export function useCart(settings: CompanySettings) {
     addToCart,
     removeFromCart,
     clearCart,
-    updateCartItem
+    updateCartItem,
   };
 }

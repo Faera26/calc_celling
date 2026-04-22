@@ -16,9 +16,13 @@ export function money(value: number) {
   return `${Math.round(Number(value || 0)).toLocaleString('ru-RU')} ₽`;
 }
 
+export function roundPrice(value: number) {
+  return Math.round(Number(value || 0) * 100) / 100;
+}
+
 export function adjustedPrice(price: number, settings: CompanySettings) {
   const withMargin = Number(price || 0) * (1 + Number(settings.marginPercent || 0) / 100);
-  return withMargin * (1 - Number(settings.discountPercent || 0) / 100);
+  return roundPrice(withMargin * (1 - Number(settings.discountPercent || 0) / 100));
 }
 
 /* ---------- Keys & table mapping ---------- */

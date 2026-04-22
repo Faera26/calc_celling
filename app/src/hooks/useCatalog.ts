@@ -106,30 +106,27 @@ export function useCatalog({ authReady, userId, userEmail }: UseCatalogOptions) 
     let cancelled = false;
 
     async function loadCounts() {
-      const [tovary, uslugi, uzly, komplektaciya] = await withTimeout(
-        Promise.all([
-          restCount('tovary'),
-          restCount('uslugi'),
-          restCount('uzly'),
-          restCount('komplektaciya_uzlov')
-        ]),
-        'Счётчики каталога'
-      );
+      // Counters are secondary data. If one request is slow or unavailable,
+      // the catalog itself should still open immediately.
+      const [tovary, uslugi, uzly, komplektaciya] = await Promise.allSettled([
+        withTimeout(restCount('tovary'), 'Счётчик товаров', 15000),
+        withTimeout(restCount('uslugi'), 'Счётчик услуг', 15000),
+        withTimeout(restCount('uzly'), 'Счётчик узлов', 15000),
+        withTimeout(restCount('komplektaciya_uzlov'), 'Счётчик комплектации узлов', 15000),
+      ]);
 
-      if (!cancelled) {
-        setCounts({
-          tovar: tovary,
-          usluga: uslugi,
-          uzel: uzly,
-          komplektaciya
-        });
-      }
+      if (cancelled) return;
+
+      setCounts({
+        tovar: tovary.status === 'fulfilled' ? tovary.value : 0,
+        usluga: uslugi.status === 'fulfilled' ? uslugi.value : 0,
+        uzel: uzly.status === 'fulfilled' ? uzly.value : 0,
+        komplektaciya: komplektaciya.status === 'fulfilled' ? komplektaciya.value : 0
+      });
     }
 
     loadCounts().catch(error => {
-      console.error("Failed to load counts:", error);
-      // We don't set loadError here to avoid blocking the UI if counts fail.
-      // Top counters will just be 0.
+      console.warn('Не удалось обновить счётчики каталога:', error);
     });
 
     return () => { cancelled = true; };

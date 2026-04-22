@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import {
   Box,
   Alert,
@@ -9,7 +9,7 @@ import {
   Typography,
 } from '@mui/material';
 import { Add as AddIcon } from '@mui/icons-material';
-import type { AuthState, CatalogType, CartEntry, CompanySettings, ItemForm, UzelComponent, UzelItem } from '../types';
+import type { AuthState, CatalogItem, CatalogType, CartEntry, CompanySettings, ItemForm, UzelComponent, UzelItem } from '../types';
 import { EMPTY_ITEM_FORM } from '../constants';
 import { useCatalog, openNodeDetails } from '../hooks/useCatalog';
 import { useConstructor } from '../hooks/useConstructor';
@@ -28,11 +28,10 @@ interface CatalogPageProps {
   auth: AuthState;
   settings: CompanySettings;
   cart: Record<string, CartEntry>;
-  onAddToCart: (type: CatalogType, item: any, components?: UzelComponent[]) => void;
+  onAddToCart: (type: CatalogType, item: CatalogItem, components?: UzelComponent[]) => void;
   onRemoveFromCart: (cartKey: string) => void;
   search: string;
   catalogRefreshToggle: number;
-  onClearError: () => void;
 }
 
 export default function CatalogPage({
@@ -47,7 +46,7 @@ export default function CatalogPage({
   const catalog = useCatalog({
     authReady: auth.ready,
     userId: auth.userId,
-    userEmail: auth.userEmail
+    userEmail: auth.userEmail,
   });
 
   const constructor = useConstructor({
@@ -61,32 +60,31 @@ export default function CatalogPage({
     onRefresh: catalog.refresh,
   });
 
-  // Since we might need to trigger refresh from layout, we sync external refresh toggle
-  // with internal refresh
-  // (In a real app we might put useCatalog at App level or use Context, 
-  // but here we just call refresh when the toggle changes if needed, or pass the catalog.search up)
-
   const [selectedNode, setSelectedNode] = useState<UzelItem | null>(null);
   const [nodeDetailsLoading, setNodeDetailsLoading] = useState(false);
-
   const [itemDialogOpen, setItemDialogOpen] = useState(false);
   const [itemForm, setItemForm] = useState<ItemForm>(EMPTY_ITEM_FORM);
   const [savingItem, setSavingItem] = useState(false);
   const [saveError, setSaveError] = useState('');
+  const catalogSearchValue = catalog.search;
+  const setCatalogSearch = catalog.setSearch;
+  const refreshCatalog = catalog.refresh;
 
-  // Sync external search with catalog search without mutating state during render.
+  // Поиск живёт в layout, а реальные данные — внутри useCatalog.
+  // Синхронизируем их тут, чтобы не менять состояние прямо во время render.
   useEffect(() => {
-    if (catalog.search !== search) {
-      catalog.setSearch(search);
+    if (catalogSearchValue !== search) {
+      setCatalogSearch(search);
     }
-  }, [search, catalog.search, catalog.setSearch]);
+  }, [search, catalogSearchValue, setCatalogSearch]);
 
-  // Trigger internal refresh when toggle changes
+  // Кнопка "обновить" из шапки просто меняет счётчик.
+  // Когда счётчик меняется, каталог перечитывает данные.
   useEffect(() => {
     if (catalogRefreshToggle > 0) {
-      catalog.refresh();
+      refreshCatalog();
     }
-  }, [catalogRefreshToggle, catalog.refresh]);
+  }, [catalogRefreshToggle, refreshCatalog]);
 
   function handleViewNode(node: UzelItem) {
     setSelectedNode(node);
@@ -94,11 +92,11 @@ export default function CatalogPage({
   }
 
   function handleOpenConstructor(node: UzelItem) {
-    setSelectedNode(null); // Close details if open
+    setSelectedNode(null);
     constructor.openConstructor(node, catalog.loadNodeComponents);
   }
 
-  async function handleAddToCart(type: CatalogType, item: any) {
+  async function handleAddToCart(type: CatalogType, item: CatalogItem) {
     if (type !== 'uzel') {
       onAddToCart(type, item);
       return;
@@ -127,7 +125,7 @@ export default function CatalogPage({
       price: Number(itemForm.price || 0),
       unit: itemForm.unit.trim(),
       image: itemForm.image.trim() || null,
-      description: itemForm.description.trim() || null
+      description: itemForm.description.trim() || null,
     };
 
     if (!newItem.name) {
@@ -138,24 +136,25 @@ export default function CatalogPage({
 
     try {
       const table = catalog.activeType === 'tovar' ? 'tovary' : catalog.activeType === 'usluga' ? 'uslugi' : 'uzly';
-      
+
       const { error } = await withTimeout(
         supabase.from(table).insert([
-          catalog.activeType === 'uzel' 
+          catalog.activeType === 'uzel'
             ? { ...newItem, stats: { positions: 0, products: 0, services: 0, source: 'manual_created' } }
-            : { ...newItem, source: 'manual' }
+            : { ...newItem, source: 'manual' },
         ]),
         'Сохранение позиции'
       );
 
-      if (error) throw error;
+      if (error) {
+        throw error;
+      }
 
       await constructor.upsertCategory(catalog.activeType, trimmedCategory, trimmedSubcategory);
 
       setItemDialogOpen(false);
       setItemForm(EMPTY_ITEM_FORM);
       catalog.refresh();
-
     } catch (error) {
       setSaveError(formatError(error));
     } finally {
@@ -170,7 +169,7 @@ export default function CatalogPage({
       <Stack direction={{ xs: 'column', md: 'row' }} spacing={3} sx={{ mt: 3, mb: 2, alignItems: { md: 'center' }, justifyContent: 'space-between' }}>
         <Tabs
           value={catalog.activeType}
-          onChange={(_, val) => catalog.setActiveType(val as CatalogType)}
+          onChange={(_, value) => catalog.setActiveType(value as CatalogType)}
           sx={{ borderBottom: 1, borderColor: 'divider' }}
         >
           <Tab value="tovar" label="Товары" />
@@ -190,9 +189,9 @@ export default function CatalogPage({
         categoriesLoading={catalog.categoriesLoading}
         activeCategory={catalog.activeCategory}
         activeSubcategory={catalog.activeSubcategory}
-        onFilterChange={(cat, sub) => {
-          catalog.setActiveCategory(cat);
-          catalog.setActiveSubcategory(sub);
+        onFilterChange={(category, subcategory) => {
+          catalog.setActiveCategory(category);
+          catalog.setActiveSubcategory(subcategory);
         }}
       />
 
@@ -245,7 +244,6 @@ export default function CatalogPage({
         </Box>
       </Box>
 
-      {/* Dialogs */}
       <NodeDetailsDialog
         node={selectedNode}
         rows={selectedNode ? catalog.nodeComponents[selectedNode.id] || [] : []}
@@ -253,11 +251,15 @@ export default function CatalogPage({
         isAdmin={auth.isAdmin}
         onClose={() => setSelectedNode(null)}
         onAddToCart={() => {
-          if (selectedNode) handleAddToCart('uzel', selectedNode);
+          if (selectedNode) {
+            handleAddToCart('uzel', selectedNode);
+          }
           setSelectedNode(null);
         }}
         onOpenConstructor={() => {
-          if (selectedNode) handleOpenConstructor(selectedNode);
+          if (selectedNode) {
+            handleOpenConstructor(selectedNode);
+          }
         }}
       />
 
@@ -286,7 +288,7 @@ export default function CatalogPage({
         error={saveError}
         onClose={() => setItemDialogOpen(false)}
         onSave={handleSaveItem}
-        onFormChange={(patch) => setItemForm(prev => ({ ...prev, ...patch }))}
+        onFormChange={(patch) => setItemForm((previousValue) => ({ ...previousValue, ...patch }))}
       />
     </Box>
   );

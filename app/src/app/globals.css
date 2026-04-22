@@ -1,0 +1,138 @@
+:root {
+  /* Основная палитра интерфейса. Переменные держим в одном месте,
+     чтобы цветовую схему было легко менять даже начинающему разработчику. */
+  --background: #ffffff;
+  --surface: rgba(255, 255, 255, 0.8);
+  --surface-low: #f5f5f7;
+  --surface-lowest: #ffffff;
+  --surface-high: #e8e8ed;
+  --surface-highest: #d2d2d7;
+  --primary: #1d1d1f;
+  --on-primary: #ffffff;
+  --secondary: #86868b;
+  --on-surface: #1d1d1f;
+  --on-surface-variant: #424245;
+  --error: #ff3b30;
+  --accent: #0071e3;
+  --safe-area-top: env(safe-area-inset-top, 0px);
+  --safe-area-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-area-left: env(safe-area-inset-left, 0px);
+  --safe-area-right: env(safe-area-inset-right, 0px);
+  line-height: 1.47059;
+  font-weight: 400;
+  letter-spacing: -0.022em;
+  color-scheme: light;
+  color: var(--on-surface);
+  background-color: var(--background);
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  min-height: 100vh;
+  background-color: var(--background);
+}
+
+body {
+  overflow-x: hidden;
+  padding-bottom: var(--safe-area-bottom);
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+.glass {
+  background: rgba(255, 255, 255, 0.72) !important;
+  backdrop-filter: saturate(180%) blur(20px) !important;
+  -webkit-backdrop-filter: saturate(180%) blur(20px) !important;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.08) !important;
+}
+
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
+  color: var(--primary);
+  letter-spacing: -0.03em;
+  font-weight: 700;
+}
+
+.headline-editorial {
+  font-weight: 700;
+  letter-spacing: -0.04em;
+}
+
+.apple-button-primary {
+  background-color: var(--accent) !important;
+  color: var(--on-primary) !important;
+  border-radius: 12px !important;
+  text-transform: none !important;
+  font-weight: 500 !important;
+  padding: 8px 18px !important;
+  font-size: 14px !important;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1) !important;
+  box-shadow: 0 2px 4px rgba(0, 113, 227, 0.2) !important;
+}
+
+.apple-button-primary:hover {
+  background-color: #0077ed !important;
+  box-shadow: 0 4px 12px rgba(0, 113, 227, 0.3) !important;
+  transform: translateY(-1px);
+}
+
+.apple-button-secondary {
+  background: var(--surface-low) !important;
+  border: none !important;
+  border-radius: 12px !important;
+  text-transform: none !important;
+  color: var(--accent) !important;
+  font-weight: 500 !important;
+  transition: all 0.2s ease !important;
+}
+
+.apple-button-secondary:hover {
+  background: var(--surface-high) !important;
+}
+
+.apple-card {
+  background: var(--surface-lowest) !important;
+  border-radius: 20px !important;
+  border: 1px solid rgba(0, 0, 0, 0.04) !important;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.04) !important;
+  transition: transform 0.4s cubic-bezier(0.2, 0.8, 0.2, 1), box-shadow 0.4s ease !important;
+}
+
+.apple-card:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.08) !important;
+}
+
+.list-transition-item {
+  transition: background-color 0.2s ease;
+}
+
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+.section-spacing {
+  margin-bottom: 40px;
+}

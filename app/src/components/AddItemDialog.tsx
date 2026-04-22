@@ -35,7 +35,7 @@ export default function AddItemDialog({
   return (
     <Dialog open={open} onClose={onClose} fullWidth maxWidth="sm">
       <DialogTitle>
-        Добавить: {labelOf(activeType).toLowerCase()}
+        Р”РѕР±Р°РІРёС‚СЊ: {labelOf(activeType).toLowerCase()}
       </DialogTitle>
       <DialogContent dividers>
         <Stack spacing={2} sx={{ mt: 1 }}>
@@ -43,10 +43,10 @@ export default function AddItemDialog({
             label="ID"
             value={form.id}
             onChange={(e) => onFormChange({ id: e.target.value })}
-            helperText="Можно оставить пустым, приложение создаст ID автоматически. Для импортов лучше задавать стабильный ID."
+            helperText="РњРѕР¶РЅРѕ РѕСЃС‚Р°РІРёС‚СЊ РїСѓСЃС‚С‹Рј, РїСЂРёР»РѕР¶РµРЅРёРµ СЃРѕР·РґР°СЃС‚ ID Р°РІС‚РѕРјР°С‚РёС‡РµСЃРєРё. Р”Р»СЏ РёРјРїРѕСЂС‚РѕРІ Р»СѓС‡С€Рµ Р·Р°РґР°РІР°С‚СЊ СЃС‚Р°Р±РёР»СЊРЅС‹Р№ ID."
           />
           <TextField
-            label="Название"
+            label="РќР°Р·РІР°РЅРёРµ"
             value={form.name}
             onChange={(e) => onFormChange({ name: e.target.value })}
             required
@@ -54,13 +54,13 @@ export default function AddItemDialog({
           <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}>
             <TextField
               fullWidth
-              label="Категория"
+              label="РљР°С‚РµРіРѕСЂРёСЏ"
               value={form.category}
               onChange={(e) => onFormChange({ category: e.target.value })}
             />
             <TextField
               fullWidth
-              label="Подкатегория"
+              label="РџРѕРґРєР°С‚РµРіРѕСЂРёСЏ"
               value={form.subcategory}
               onChange={(e) => onFormChange({ subcategory: e.target.value })}
             />
@@ -68,26 +68,26 @@ export default function AddItemDialog({
           <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}>
             <TextField
               fullWidth
-              label="Цена"
+              label="Р¦РµРЅР°"
               type="number"
               value={form.price}
               onChange={(e) => onFormChange({ price: e.target.value })}
             />
             <TextField
               fullWidth
-              label="Ед. изм."
+              label="Р•Рґ. РёР·Рј."
               value={form.unit}
               onChange={(e) => onFormChange({ unit: e.target.value })}
-              placeholder="шт., м. п., м²"
+              placeholder="С€С‚., Рј. Рї., РјВІ"
             />
           </Stack>
           <TextField
-            label="Ссылка на картинку"
+            label="РЎСЃС‹Р»РєР° РЅР° РєР°СЂС‚РёРЅРєСѓ"
             value={form.image}
             onChange={(e) => onFormChange({ image: e.target.value })}
           />
           <TextField
-            label="Описание"
+            label="РћРїРёСЃР°РЅРёРµ"
             multiline
             minRows={3}
             value={form.description}
@@ -95,16 +95,16 @@ export default function AddItemDialog({
           />
           {activeType === 'uzel' && (
             <Alert severity="info">
-              Сейчас добавляется карточка узла. После сохранения открой "Конструктор", чтобы добавить товары и услуги внутрь узла.
+              РЎРµР№С‡Р°СЃ РґРѕР±Р°РІР»СЏРµС‚СЃСЏ РєР°СЂС‚РѕС‡РєР° СѓР·Р»Р°. РџРѕСЃР»Рµ СЃРѕС…СЂР°РЅРµРЅРёСЏ РѕС‚РєСЂРѕР№ &quot;РљРѕРЅСЃС‚СЂСѓРєС‚РѕСЂ&quot;, С‡С‚РѕР±С‹ РґРѕР±Р°РІРёС‚СЊ С‚РѕРІР°СЂС‹ Рё СѓСЃР»СѓРіРё РІРЅСѓС‚СЂСЊ СѓР·Р»Р°.
             </Alert>
           )}
           {error && <Alert severity="error">{error}</Alert>}
         </Stack>
       </DialogContent>
       <DialogActions>
-        <Button onClick={onClose}>Отмена</Button>
+        <Button onClick={onClose}>РћС‚РјРµРЅР°</Button>
         <Button variant="contained" disabled={saving} onClick={onSave}>
-          {saving ? 'Сохраняю...' : 'Сохранить'}
+          {saving ? 'РЎРѕС…СЂР°РЅСЏСЋ...' : 'РЎРѕС…СЂР°РЅРёС‚СЊ'}
         </Button>
       </DialogActions>
     </Dialog>

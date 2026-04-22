@@ -22,7 +22,9 @@ interface RestMutationOptions {
   returning?: 'minimal' | 'representation';
 }
 
-const restBaseUrl = import.meta.env.DEV ? '/supabase-rest' : `${supabaseUrl}/rest/v1`;
+// Приложение теперь собирается как статический Next.js export.
+// У такого режима нет локального Vite proxy, поэтому REST идёт напрямую в Supabase.
+const restBaseUrl = `${supabaseUrl}/rest/v1`;
 
 async function buildRestHeaders(extra?: HeadersInit): Promise<HeadersInit> {
   const { data } = await supabase.auth.getSession();
@@ -73,8 +75,38 @@ function buildMutationUrl(table: string, options: RestMutationOptions = {}) {
   return `${restBaseUrl}/${table}${params.toString() ? `?${params.toString()}` : ''}`;
 }
 
+const CACHE_TTL = 30000;
+const restCache = new Map<string, { data: unknown; timestamp: number }>();
+
+function getCached<T>(key: string): T | null {
+  const cached = restCache.get(key);
+  if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
+    return cached.data as T;
+  }
+  return null;
+}
+
+function setCache(key: string, data: unknown) {
+  restCache.set(key, { data, timestamp: Date.now() });
+}
+
+function countCacheKey(url: string) {
+  return `count:${url}`;
+}
+
+function readCountFromResponse(response: Response): number | null {
+  const contentRange = response.headers.get('content-range') || '';
+  const total = Number(contentRange.split('/').pop() || '');
+
+  return Number.isFinite(total) ? total : null;
+}
+
 export async function restSelect<T>(table: string, options: RestSelectOptions): Promise<T[]> {
-  const response = await fetch(buildRestUrl(table, options), {
+  const url = buildRestUrl(table, options);
+  const cached = getCached<T[]>(url);
+  if (cached) return cached;
+
+  const response = await fetch(url, {
     headers: await buildRestHeaders(),
     cache: 'no-store',
   });
@@ -84,10 +116,13 @@ export async function restSelect<T>(table: string, options: RestSelectOptions): 
     throw new Error(`${table}: ${response.status} ${response.statusText}${text ? ` · ${text}` : ''}`);
   }
 
-  return await response.json() as T[];
+  const data = await response.json() as T[];
+  setCache(url, data);
+  return data;
 }
 
 export async function restInsert<T>(table: string, rows: unknown | unknown[], options: RestInsertOptions = {}): Promise<T[]> {
+  restCache.clear();
   const params = new URLSearchParams();
   if (options.select) params.set('select', options.select);
 
@@ -113,6 +148,7 @@ export async function restInsert<T>(table: string, rows: unknown | unknown[], op
 }
 
 export async function restUpdate<T>(table: string, patch: unknown, options: RestMutationOptions = {}): Promise<T[]> {
+  restCache.clear();
   const response = await fetch(buildMutationUrl(table, options), {
     method: 'PATCH',
     cache: 'no-store',
@@ -134,6 +170,7 @@ export async function restUpdate<T>(table: string, patch: unknown, options: Rest
 }
 
 export async function restDelete<T>(table: string, options: RestMutationOptions = {}): Promise<T[]> {
+  restCache.clear();
   const response = await fetch(buildMutationUrl(table, options), {
     method: 'DELETE',
     cache: 'no-store',
@@ -157,17 +194,55 @@ export async function restCount(table: string, filters?: RestFilters): Promise<n
   params.set('select', 'id');
   appendFilters(params, filters);
 
-  const response = await fetch(`${restBaseUrl}/${table}?${params.toString()}`, {
-    method: 'HEAD',
-    cache: 'no-store',
-    headers: await buildRestHeaders({ Prefer: 'count=exact' }),
-  });
+  const url = `${restBaseUrl}/${table}?${params.toString()}`;
+  const cacheKey = countCacheKey(url);
+  const cached = getCached<number>(cacheKey);
+  if (cached !== null) return cached;
 
-  if (!response.ok) {
-    throw new Error(`${table}: ${response.status} ${response.statusText}`);
+  const headers = await buildRestHeaders({ Prefer: 'count=exact' });
+
+  try {
+    // HEAD is faster, but some environments reject it because of CORS or proxy rules.
+    // We try it first and then transparently fall back to GET.
+    const headResponse = await fetch(url, {
+      method: 'HEAD',
+      cache: 'no-store',
+      headers,
+    });
+
+    if (headResponse.ok) {
+      const result = readCountFromResponse(headResponse);
+      if (result !== null) {
+        setCache(cacheKey, result);
+        return result;
+      }
+    }
+  } catch {
+    // Ignore and continue with GET fallback below.
   }
 
-  const contentRange = response.headers.get('content-range') || '';
-  const total = Number(contentRange.split('/').pop() || 0);
-  return Number.isFinite(total) ? total : 0;
+  const getResponse = await fetch(url, {
+    method: 'GET',
+    cache: 'no-store',
+    headers: {
+      ...headers,
+      Range: '0-0',
+      'Range-Unit': 'items',
+    },
+  });
+
+  if (!getResponse.ok) {
+    throw new Error(`${table}: ${getResponse.status} ${getResponse.statusText}`);
+  }
+
+  const rangedCount = readCountFromResponse(getResponse);
+  if (rangedCount !== null) {
+    setCache(cacheKey, rangedCount);
+    return rangedCount;
+  }
+
+  const rows = await getResponse.json() as unknown[];
+  const fallbackCount = Array.isArray(rows) ? rows.length : 0;
+  setCache(cacheKey, fallbackCount);
+  return fallbackCount;
 }

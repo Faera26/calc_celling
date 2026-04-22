@@ -1,13 +1,7 @@
 {
   "version": 2,
-  "framework": "vite",
+  "framework": "nextjs",
   "buildCommand": "npm run build --prefix app",
   "installCommand": "npm install --prefix app --legacy-peer-deps",
-  "outputDirectory": "app/dist",
-  "rewrites": [
-    {
-      "source": "/(.*)",
-      "destination": "/index.html"
-    }
-  ]
+  "outputDirectory": "app/out"
 }

@@ -93,9 +93,13 @@ export default function AdminPage({ auth }: AdminPageProps) {
     });
 
     if (saveError) {
-      setError(formatError(saveError));
+      console.error('Error setting role:', saveError);
+      setError(`Ошибка сохранения: ${saveError.message || JSON.stringify(saveError)}`);
     } else {
       setUsers(prev => prev.map(user => user.id === userId ? { ...user, role } : user));
+      const user = users.find(u => u.id === userId);
+      const name = user?.display_name || user?.email || 'Пользователь';
+      alert(`Роль для ${name} успешно изменена на ${role}`);
     }
 
     setSavingId('');

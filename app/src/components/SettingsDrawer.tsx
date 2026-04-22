@@ -1,3 +1,5 @@
+'use client';
+
 import {
   Drawer,
   Box,
@@ -6,7 +8,6 @@ import {
   Avatar,
   Button,
   Alert,
-  Divider,
   List,
   ListItem,
   ListItemButton,
@@ -20,10 +21,11 @@ import {
   Description as EstimatesIcon,
   Person as ProfileIcon,
   AdminPanelSettings as AdminIcon,
-  Logout as LogoutIcon,
   Storefront as CatalogIcon,
+  KeyboardArrowRight as ArrowIcon,
 } from '@mui/icons-material';
-import { useNavigate } from 'react-router-dom';
+import { useRouter } from 'next/navigation';
+import { APP_NAV_ITEMS } from '../features/app/navigation';
 import type { CompanySettings } from '../types';
 
 interface SettingsDrawerProps {
@@ -34,6 +36,8 @@ interface SettingsDrawerProps {
   onAvatar: (file?: File) => void;
   isAdmin?: boolean;
   onLogout?: () => void;
+  syncSource?: 'local' | 'supabase';
+  syncError?: string;
 }
 
 export default function SettingsDrawer({
@@ -44,93 +48,132 @@ export default function SettingsDrawer({
   onAvatar,
   isAdmin,
   onLogout,
+  syncSource,
+  syncError,
 }: SettingsDrawerProps) {
-  const navigate = useNavigate();
+  const router = useRouter();
 
-  const handleNav = (to: string) => {
-    navigate(to);
+  function handleNav(path: string) {
+    router.push(path);
     onClose();
-  };
+  }
+
+  function renderNavIcon(href: string) {
+    if (href === '/') {
+      return <CatalogIcon sx={{ color: '#000' }} />;
+    }
+
+    if (href === '/estimates') {
+      return <EstimatesIcon sx={{ color: '#000' }} />;
+    }
+
+    if (href === '/profile') {
+      return <ProfileIcon sx={{ color: '#000' }} />;
+    }
+
+    return <AdminIcon sx={{ color: '#000' }} />;
+  }
 
   return (
-    <Drawer anchor="right" open={open} onClose={onClose}>
-      <Box sx={{ width: { xs: '100vw', sm: 460 }, p: 3 }}>
-        <Stack direction="row" sx={{ mb: 2, alignItems: 'center', justifyContent: 'space-between' }}>
-          <Typography variant="h4">Настройки и меню</Typography>
-          <IconButton onClick={onClose}><CloseIcon /></IconButton>
+    <Drawer
+      anchor="right"
+      open={open}
+      onClose={onClose}
+      slotProps={{
+        paper: {
+          sx: {
+            width: { xs: '100vw', sm: 400 },
+            borderRadius: { xs: 0, sm: '24px 0 0 24px' },
+            border: 'none',
+            boxShadow: '-10px 0 30px rgba(0,0,0,0.05)',
+            bgcolor: '#F5F5F7',
+          },
+        },
+      }}
+    >
+      <Box sx={{ p: { xs: 2, sm: 4 }, pt: 'var(--safe-area-top)' }}>
+        <Stack direction="row" sx={{ mb: 4, alignItems: 'center', justifyContent: 'space-between' }}>
+          <Typography variant="h5" className="headline-editorial">Меню</Typography>
+          <IconButton onClick={onClose} sx={{ bgcolor: 'rgba(0,0,0,0.05)' }}>
+            <CloseIcon />
+          </IconButton>
         </Stack>
 
-        <Stack spacing={3}>
-          {/* Навигация */}
+        <Stack spacing={4}>
           <Box>
-            <Typography variant="overline" color="text.secondary" sx={{ ml: 1 }}>Меню</Typography>
-            <List sx={{ bgcolor: 'action.hover', borderRadius: 2, mt: 1 }}>
-              <ListItem disablePadding>
-                <ListItemButton onClick={() => handleNav('/')}>
-                  <ListItemIcon><CatalogIcon color="primary" /></ListItemIcon>
-                  <ListItemText primary="Каталог" />
-                </ListItemButton>
-              </ListItem>
-              <ListItem disablePadding>
-                <ListItemButton onClick={() => handleNav('/estimates')}>
-                  <ListItemIcon><EstimatesIcon color="primary" /></ListItemIcon>
-                  <ListItemText primary="Редактор смет (шаблоны)" />
-                </ListItemButton>
-              </ListItem>
-              <ListItem disablePadding>
-                <ListItemButton onClick={() => handleNav('/profile')}>
-                  <ListItemIcon><ProfileIcon color="primary" /></ListItemIcon>
-                  <ListItemText primary="Мой профиль" />
-                </ListItemButton>
-              </ListItem>
-              {isAdmin && (
-                <ListItem disablePadding>
-                  <ListItemButton onClick={() => handleNav('/admin')}>
-                    <ListItemIcon><AdminIcon color="secondary" /></ListItemIcon>
-                    <ListItemText primary="Админка" />
-                  </ListItemButton>
-                </ListItem>
-              )}
-              {onLogout && (
-                <ListItem disablePadding sx={{ display: { xs: 'block', sm: 'none' } }}>
-                  <ListItemButton onClick={() => { onLogout(); onClose(); }}>
-                    <ListItemIcon><LogoutIcon color="error" /></ListItemIcon>
-                    <ListItemText primary="Выйти" sx={{ color: 'error.main' }} />
-                  </ListItemButton>
-                </ListItem>
-              )}
+            <Typography variant="caption" sx={{ color: 'var(--secondary)', fontWeight: 600, ml: 1, mb: 1, display: 'block', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+              Приложение
+            </Typography>
+            <List sx={{ bgcolor: '#fff', borderRadius: '16px', overflow: 'hidden', p: 0 }}>
+              {APP_NAV_ITEMS
+                .filter((item) => !item.adminOnly || isAdmin)
+                .map((item, index, items) => (
+                  <ListItem key={item.href} disablePadding divider={index !== items.length - 1}>
+                    <ListItemButton onClick={() => handleNav(item.href)} sx={{ py: 1.5 }}>
+                      <ListItemIcon sx={{ minWidth: 40 }}>{renderNavIcon(item.href)}</ListItemIcon>
+                      <ListItemText primary={item.label} slotProps={{ primary: { sx: { fontWeight: 600 } } }} />
+                      <ArrowIcon sx={{ color: 'rgba(0,0,0,0.2)', fontSize: 20 }} />
+                    </ListItemButton>
+                  </ListItem>
+                ))}
             </List>
           </Box>
 
-          <Divider />
-
-          {/* Настройки компании */}
           <Box>
-            <Typography variant="overline" color="text.secondary" sx={{ ml: 1 }}>Профиль компании</Typography>
-            <Stack spacing={2} sx={{ mt: 1 }}>
-              <Stack direction="row" spacing={2} sx={{ alignItems: 'center' }}>
-                <Avatar src={settings.avatarDataUrl || undefined} sx={{ width: 72, height: 72, bgcolor: 'primary.main' }}>
+            <Typography variant="caption" sx={{ color: 'var(--secondary)', fontWeight: 600, ml: 1, mb: 1, display: 'block', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+              Компания
+            </Typography>
+            <Stack spacing={2} sx={{ bgcolor: '#fff', borderRadius: '16px', p: 3 }}>
+              <Stack direction="row" spacing={2} sx={{ alignItems: 'center', mb: 1 }}>
+                <Avatar
+                  src={settings.avatarDataUrl || undefined}
+                  sx={{ width: 64, height: 64, bgcolor: '#000', fontSize: '1.5rem', fontWeight: 800 }}
+                >
                   {settings.companyName.slice(0, 1)}
                 </Avatar>
-                <Button variant="outlined" component="label" size="small">
-                  Загрузить логотип
+                <Button variant="outlined" component="label" size="small" sx={{ borderRadius: '8px' }} disabled={!isAdmin}>
+                  Логотип
                   <input hidden type="file" accept="image/*" onChange={(event) => onAvatar(event.target.files?.[0])} />
                 </Button>
               </Stack>
-              <TextField fullWidth label="Название компании" value={settings.companyName} onChange={(e) => onUpdate({ companyName: e.target.value })} />
-              <TextField fullWidth label="Менеджер" value={settings.managerName} onChange={(e) => onUpdate({ managerName: e.target.value })} />
-              <TextField fullWidth label="Телефон" value={settings.phone} onChange={(e) => onUpdate({ phone: e.target.value })} />
-              <TextField fullWidth label="Email" value={settings.email} onChange={(e) => onUpdate({ email: e.target.value })} />
+
+              <TextField fullWidth size="small" label="Название" value={settings.companyName} onChange={(event) => onUpdate({ companyName: event.target.value })} disabled={!isAdmin} />
+              <TextField fullWidth size="small" label="Менеджер" value={settings.managerName} onChange={(event) => onUpdate({ managerName: event.target.value })} disabled={!isAdmin} />
+
               <Stack direction="row" spacing={2}>
-                <TextField fullWidth label="Маржа %" type="number" value={settings.marginPercent} onChange={(e) => onUpdate({ marginPercent: Number(e.target.value) })} />
-                <TextField fullWidth label="Скидка %" type="number" value={settings.discountPercent} onChange={(e) => onUpdate({ discountPercent: Number(e.target.value) })} />
+                <TextField fullWidth size="small" label="Маржа %" type="number" value={settings.marginPercent} onChange={(event) => onUpdate({ marginPercent: Number(event.target.value) })} disabled={!isAdmin} />
+                <TextField fullWidth size="small" label="Скидка %" type="number" value={settings.discountPercent} onChange={(event) => onUpdate({ discountPercent: Number(event.target.value) })} disabled={!isAdmin} />
               </Stack>
-              <TextField multiline minRows={3} label="Примечание в PDF" value={settings.pdfNote} onChange={(e) => onUpdate({ pdfNote: e.target.value })} />
             </Stack>
           </Box>
 
-          <Alert severity="info">
-            Эти настройки пока хранятся локально. Позже привяжем к Supabase.
+          {onLogout && (
+            <Button
+              fullWidth
+              variant="outlined"
+              color="error"
+              onClick={() => {
+                onLogout();
+                onClose();
+              }}
+              sx={{ borderRadius: '12px', borderColor: 'rgba(211, 47, 47, 0.2)', py: 1.5 }}
+            >
+              Выйти из аккаунта
+            </Button>
+          )}
+
+          {syncError && (
+            <Alert severity="warning" sx={{ borderRadius: '12px' }}>
+              {syncError}
+            </Alert>
+          )}
+
+          <Alert severity="info" sx={{ borderRadius: '12px', bgcolor: 'rgba(2, 136, 209, 0.05)', color: '#0288d1', '& .MuiAlert-icon': { color: '#0288d1' } }}>
+            {syncSource === 'supabase'
+              ? isAdmin
+                ? 'Настройки компании синхронизируются с Supabase и общие для всей команды.'
+                : 'Настройки компании загружены из Supabase. Изменять их может администратор.'
+              : 'Сейчас показан локальный резервный кэш настроек. Проверь подключение к Supabase.'}
           </Alert>
         </Stack>
       </Box>

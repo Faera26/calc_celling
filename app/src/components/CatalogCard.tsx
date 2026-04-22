@@ -11,10 +11,9 @@ import {
   Typography,
 } from '@mui/material';
 import { Add as AddIcon, Remove as RemoveIcon } from '@mui/icons-material';
-import type { CatalogItem, CatalogType, UzelComponent } from '../types';
 import { PLACEHOLDER_IMAGE } from '../constants';
+import type { CatalogItem, CatalogType, CompanySettings, UzelComponent } from '../types';
 import { adjustedPrice, keyOf, labelOf, money, nodeCompositionCounts } from '../utils';
-import type { CompanySettings } from '../types';
 
 interface CatalogCardProps {
   item: CatalogItem;
@@ -46,68 +45,66 @@ export default function CatalogCard({
   const cartKey = keyOf(activeType, item.id);
 
   return (
-    <Card key={cartKey} sx={{ display: 'flex', flexDirection: 'column', minHeight: 360 }}>
-      <Box sx={{ height: 150, backgroundColor: '#F8FAFC', display: 'flex', alignItems: 'center', justifyContent: 'center', p: 2 }}>
+    <Card key={cartKey} sx={{ display: 'flex', flexDirection: 'column', height: '100%', borderRadius: '24px' }}>
+      <Box sx={{ height: 180, backgroundColor: 'rgba(0,0,0,0.02)', display: 'flex', alignItems: 'center', justifyContent: 'center', p: 3 }}>
         <CardMedia
           component="img"
           image={item.image || PLACEHOLDER_IMAGE}
           alt={item.name}
-          sx={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain', mixBlendMode: 'multiply' }}
+          sx={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain', mixBlendMode: 'multiply', transition: 'transform 0.5s ease', '&:hover': { transform: 'scale(1.05)' } }}
         />
       </Box>
-      <CardContent sx={{ flexGrow: 1 }}>
-        <Stack direction="row" spacing={1} sx={{ mb: 1, flexWrap: 'wrap', gap: 1 }}>
-          <Chip size="small" label={labelOf(activeType)} color={activeType === 'uzel' ? 'secondary' : 'primary'} />
-          <Chip size="small" label={`ID ${item.id}`} variant="outlined" />
+      <CardContent sx={{ flexGrow: 1, px: 2.5, pt: 2.5 }}>
+        <Stack direction="row" spacing={1} sx={{ mb: 1.5, flexWrap: 'wrap', gap: 1 }}>
+          <Chip size="small" label={labelOf(activeType)} sx={{ bgcolor: activeType === 'uzel' ? 'var(--secondary)' : 'var(--primary)', color: '#fff', fontWeight: 600, fontSize: '0.65rem' }} />
+          <Typography variant="caption" sx={{ color: 'var(--secondary)', fontWeight: 500 }}>
+            ID {item.id} • {item.category}
+          </Typography>
         </Stack>
-        <Typography variant="caption" color="text.secondary">
-          {item.category} / {item.subcategory}
-        </Typography>
-        <Typography variant="h6" sx={{ mt: 1, lineHeight: 1.25 }}>
+        <Typography variant="h6" sx={{ lineHeight: 1.2, fontWeight: 700, fontSize: '1.1rem', mb: 1 }}>
           {item.name}
         </Typography>
         {activeType === 'uzel' && (
-          <Stack direction="row" spacing={1} sx={{ mt: 1, flexWrap: 'wrap', gap: 1 }}>
+          <Stack direction="row" spacing={0.5} sx={{ mt: 1, flexWrap: 'wrap', gap: 0.5 }}>
             <Chip
               size="small"
               variant="outlined"
-              label={`Комплектация: ${typeof componentCount === 'number' ? `${componentCount} поз.` : 'открой'}`}
+              sx={{ borderColor: 'rgba(0,0,0,0.05)', bgcolor: 'rgba(0,0,0,0.02)', fontSize: '0.7rem' }}
+              label={typeof componentCount === 'number' ? `${componentCount} поз.` : 'Состав'}
             />
-            {typeof composition?.products === 'number' && (
-              <Chip size="small" variant="outlined" label={`Товары: ${composition.products}`} />
-            )}
-            {typeof composition?.services === 'number' && (
-              <Chip size="small" variant="outlined" label={`Услуги: ${composition.services}`} />
-            )}
           </Stack>
         )}
-        <Typography variant="h4" color="primary.main" sx={{ mt: 2 }}>
-          {money(adjustedPrice(item.price, settings))}
-        </Typography>
-        <Typography variant="body2" color="text.secondary">
-          база {money(item.price)} {item.unit ? `/ ${item.unit}` : ''}
-        </Typography>
+        <Box sx={{ mt: 'auto', pt: 2 }}>
+          <Typography variant="h5" sx={{ fontWeight: 800, color: 'var(--primary)' }}>
+            {money(adjustedPrice(item.price, settings))}
+          </Typography>
+          <Typography variant="caption" sx={{ color: 'var(--secondary)', opacity: 0.8 }}>
+            база {money(item.price)} {item.unit ? `/ ${item.unit}` : ''}
+          </Typography>
+        </Box>
       </CardContent>
-      <CardActions sx={{ p: 2, pt: 0 }}>
-        <Stack direction="row" spacing={1} sx={{ width: '100%' }}>
+      <CardActions sx={{ p: 2.5, pt: 0 }}>
+        <Stack spacing={1.5} sx={{ width: '100%' }}>
           {activeType === 'uzel' && (
-            <Button fullWidth variant="outlined" onClick={onViewNode}>
-              Смотреть
-            </Button>
-          )}
-          {activeType === 'uzel' && isAdmin && (
-            <Button fullWidth variant="outlined" color="secondary" onClick={onOpenConstructor}>
-              Конструктор
-            </Button>
+            <Stack direction="row" spacing={1}>
+              <Button fullWidth variant="outlined" onClick={onViewNode} sx={{ borderRadius: '12px', py: 1 }}>
+                Инфо
+              </Button>
+              {isAdmin && (
+                <Button fullWidth variant="outlined" color="inherit" onClick={onOpenConstructor} sx={{ borderRadius: '12px', py: 1 }}>
+                  Состав
+                </Button>
+              )}
+            </Stack>
           )}
           {cartQty > 0 ? (
-            <Stack direction="row" sx={{ width: '100%', alignItems: 'center', justifyContent: 'space-between', border: '1px solid', borderColor: 'divider', borderRadius: 1 }}>
-              <IconButton onClick={onRemoveFromCart}><RemoveIcon /></IconButton>
-              <Typography sx={{ fontWeight: 700 }}>{cartQty}</Typography>
-              <IconButton onClick={onAddToCart}><AddIcon /></IconButton>
+            <Stack direction="row" sx={{ width: '100%', alignItems: 'center', justifyContent: 'space-between', bgcolor: 'rgba(0,0,0,0.05)', borderRadius: '12px', px: 1 }}>
+              <IconButton size="small" onClick={onRemoveFromCart}><RemoveIcon fontSize="small" /></IconButton>
+              <Typography sx={{ fontWeight: 800 }}>{cartQty}</Typography>
+              <IconButton size="small" onClick={onAddToCart}><AddIcon fontSize="small" /></IconButton>
             </Stack>
           ) : (
-            <Button fullWidth variant="contained" onClick={onAddToCart}>
+            <Button fullWidth variant="contained" onClick={onAddToCart} sx={{ borderRadius: '12px', py: 1, bgcolor: 'var(--primary)' }}>
               В смету
             </Button>
           )}

@@ -158,6 +158,7 @@ export interface EstimateSaveDraft {
   clientComment: string;
   status: EstimateStatus;
   rooms: EstimateRoomDraft[];
+  calculationRules?: EstimateCalculationRule[];
 }
 
 export interface EstimateCalculationRule {
@@ -182,6 +183,52 @@ export interface EstimateCalculationRule {
 export interface EstimateSettingsSnapshot {
   calculation_rules?: EstimateCalculationRule[];
   [key: string]: unknown;
+}
+
+export interface EstimateComponentSnapshot {
+  item_type: ComponentType;
+  item_id: string;
+  item_name: string;
+  qty: number;
+  unit: string;
+  price: number;
+  total: number;
+  base_price?: number | null;
+  category?: string | null;
+  subcategory?: string | null;
+  image?: string | null;
+  comment?: string | null;
+}
+
+export interface EstimateSourceSnapshot {
+  image?: string | null;
+  description?: string | null;
+  source?: string | null;
+  name?: string | null;
+  category?: string | null;
+  subcategory?: string | null;
+  unit?: string | null;
+  base_price?: number | null;
+  rule_id?: string | null;
+  rule_label?: string | null;
+  metric?: EstimateCalculationMetric | null;
+  auto_generated?: boolean | null;
+}
+
+export interface EstimateItemSnapshot {
+  item_type: CatalogType;
+  item_id: string;
+  name: string;
+  category?: string | null;
+  subcategory?: string | null;
+  unit?: string | null;
+  image?: string | null;
+  description?: string | null;
+  source?: string | null;
+  base_price?: number | null;
+  saved_price?: number | null;
+  saved_at?: string | null;
+  stats?: Record<string, unknown> | null;
 }
 
 export interface SavedEstimate {
@@ -240,20 +287,7 @@ export interface SavedEstimatePosition {
   total: number;
   category?: string | null;
   subcategory?: string | null;
-  source_snapshot?: {
-    image?: string | null;
-    description?: string | null;
-    source?: string | null;
-  } | null;
-  components_snapshot?: Array<{
-    item_type: ComponentType;
-    item_id: string;
-    item_name: string;
-    qty: number;
-    unit: string;
-    price: number;
-    total: number;
-    category?: string | null;
-    subcategory?: string | null;
-  }> | null;
+  item_snapshot?: EstimateItemSnapshot | null;
+  source_snapshot?: EstimateSourceSnapshot | null;
+  components_snapshot?: EstimateComponentSnapshot[] | null;
 }
