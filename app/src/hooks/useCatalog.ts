@@ -32,6 +32,7 @@ interface UseCatalogOptions {
 const CATALOG_COUNTS_TIMEOUT_MS = 5000;
 const CATALOG_DATA_TIMEOUT_MS = 8000;
 const NODE_COMPONENTS_TIMEOUT_MS = 8000;
+const CATALOG_COUNTS_DELAY_MS = 1500;
 
 export function useCatalog({ authReady, userId, userEmail }: UseCatalogOptions) {
   const storedUser = readStoredAuthUser();
@@ -106,32 +107,41 @@ export function useCatalog({ authReady, userId, userEmail }: UseCatalogOptions) 
     if (!resolvedUserId) return;
 
     let cancelled = false;
+    const timer = window.setTimeout(() => {
+      void loadCounts();
+    }, CATALOG_COUNTS_DELAY_MS);
 
     async function loadCounts() {
-      // Счётчики не должны держать страницу в ожидании десятки секунд.
-      const [tovary, uslugi, uzly, komplektaciya] = await Promise.allSettled([
-        withTimeout(restCount('tovary'), 'Счётчик товаров', CATALOG_COUNTS_TIMEOUT_MS),
-        withTimeout(restCount('uslugi'), 'Счётчик услуг', CATALOG_COUNTS_TIMEOUT_MS),
-        withTimeout(restCount('uzly'), 'Счётчик узлов', CATALOG_COUNTS_TIMEOUT_MS),
-        withTimeout(restCount('komplektaciya_uzlov'), 'Счётчик комплектации узлов', CATALOG_COUNTS_TIMEOUT_MS),
-      ]);
+      // Счётчики вторичны: грузим их после первого экрана и по одному,
+      // чтобы не создавать пачку параллельных запросов к Supabase.
+      const countTargets: Array<[keyof CatalogCounts, string, string]> = [
+        ['tovar', 'tovary', 'Счётчик товаров'],
+        ['usluga', 'uslugi', 'Счётчик услуг'],
+        ['uzel', 'uzly', 'Счётчик узлов'],
+        ['komplektaciya', 'komplektaciya_uzlov', 'Счётчик комплектации узлов'],
+      ];
+      const nextCounts: CatalogCounts = { ...EMPTY_COUNTS };
 
-      if (cancelled) return;
+      for (const [key, table, label] of countTargets) {
+        try {
+          nextCounts[key] = await withTimeout(
+            restCount(table),
+            label,
+            CATALOG_COUNTS_TIMEOUT_MS,
+          );
+        } catch {
+          nextCounts[key] = 0;
+        }
 
-      setCounts({
-        tovar: tovary.status === 'fulfilled' ? tovary.value : 0,
-        usluga: uslugi.status === 'fulfilled' ? uslugi.value : 0,
-        uzel: uzly.status === 'fulfilled' ? uzly.value : 0,
-        komplektaciya: komplektaciya.status === 'fulfilled' ? komplektaciya.value : 0,
-      });
+        if (cancelled) return;
+      }
+
+      setCounts(nextCounts);
     }
-
-    loadCounts().catch((error) => {
-      console.warn('Не удалось обновить счётчики каталога:', error);
-    });
 
     return () => {
       cancelled = true;
+      window.clearTimeout(timer);
     };
   }, [authReady, resolvedUserEmail, resolvedUserId, catalogRefresh]);
 
@@ -140,55 +150,22 @@ export function useCatalog({ authReady, userId, userEmail }: UseCatalogOptions) 
 
     let cancelled = false;
 
-    async function loadCategories() {
-      setCategoriesLoading(true);
-      try {
-        const data = await withTimeout(
-          restSelect<CategoryRow>('kategorii', {
-            select: 'category,subcategory,items_count',
-            filters: { entity_type: activeType },
-            order: 'category.asc,subcategory.asc',
-          }),
-          'Категории',
-          CATALOG_DATA_TIMEOUT_MS,
-        );
-
-        if (cancelled) return;
-        setCategories(buildCategoryGroups(data || []));
-      } catch (error) {
-        if (cancelled) return;
-        setCategories([]);
-        setLoadError(formatError(error));
-      } finally {
-        if (!cancelled) {
-          setCategoriesLoading(false);
-        }
-      }
-    }
-
-    void loadCategories();
-    return () => {
-      cancelled = true;
-    };
-  }, [authReady, resolvedUserEmail, resolvedUserId, activeType, catalogRefresh]);
-
-  useEffect(() => {
-    if (!authReady || !resolvedUserEmail || !resolvedUserId) return;
-
-    let cancelled = false;
-
-    async function loadPage() {
+    async function loadCatalogPage() {
       setItemsLoading(true);
+      setCategoriesLoading(true);
       setLoadError('');
 
       try {
         const from = (page - 1) * PAGE_SIZE;
         const table = tableOf(activeType);
         const filters: Record<string, string> = {};
+
         if (activeCategory !== ALL_OPTION) filters.category = activeCategory;
         if (activeSubcategory !== ALL_OPTION) filters.subcategory = activeSubcategory;
 
-        const data = await withTimeout(
+        // Сначала показываем сам список позиций. Категории добираем после него,
+        // чтобы пользователь быстрее увидел каталог, даже если боковые данные тормозят.
+        const pageData = await withTimeout(
           restSelect<CatalogItem>(table, {
             select: catalogColumnsOf(activeType),
             filters,
@@ -203,7 +180,7 @@ export function useCatalog({ authReady, userId, userEmail }: UseCatalogOptions) 
 
         if (cancelled) return;
 
-        const rows = ((data || []) as CatalogItem[]).map((item) => normalizeItem(item));
+        const rows = ((pageData || []) as CatalogItem[]).map((item) => normalizeItem(item));
         const visibleRows = rows.slice(0, PAGE_SIZE);
         const nextExists = rows.length > PAGE_SIZE;
         const fallbackTotal = from + visibleRows.length + (nextExists ? 1 : 0);
@@ -212,20 +189,41 @@ export function useCatalog({ authReady, userId, userEmail }: UseCatalogOptions) 
         setItems(visibleRows);
         setHasNextPage(nextExists);
         setItemsTotal(filterIsActive ? fallbackTotal : unfilteredTotal);
+
+        try {
+          const categoryData = await withTimeout(
+            restSelect<CategoryRow>('kategorii', {
+              select: 'category,subcategory,items_count',
+              filters: { entity_type: activeType },
+              order: 'category.asc,subcategory.asc',
+            }),
+            'Категории',
+            CATALOG_DATA_TIMEOUT_MS,
+          );
+
+          if (cancelled) return;
+          setCategories(buildCategoryGroups(categoryData || []));
+        } catch (error) {
+          if (cancelled) return;
+          setCategories([]);
+          console.warn('Не удалось загрузить категории каталога:', error);
+        }
       } catch (error) {
         if (cancelled) return;
         setItems([]);
         setItemsTotal(0);
         setHasNextPage(false);
+        setCategories([]);
         setLoadError(formatError(error));
       } finally {
         if (!cancelled) {
           setItemsLoading(false);
+          setCategoriesLoading(false);
         }
       }
     }
 
-    void loadPage();
+    void loadCatalogPage();
     return () => {
       cancelled = true;
     };

@@ -79,6 +79,33 @@ export function readStoredAuthUser() {
   }
 }
 
+interface StoredAuthSession {
+  access_token?: unknown;
+  refresh_token?: unknown;
+  user?: {
+    id?: unknown;
+    email?: unknown;
+  };
+}
+
+export function readStoredAuthSession() {
+  if (typeof window === 'undefined' || !authStorageKey) return null;
+
+  try {
+    const rawValue = window.localStorage.getItem(authStorageKey);
+    if (!rawValue) return null;
+
+    return JSON.parse(rawValue) as StoredAuthSession;
+  } catch {
+    return null;
+  }
+}
+
+export function readStoredAccessToken() {
+  const session = readStoredAuthSession();
+  return typeof session?.access_token === 'string' ? session.access_token : '';
+}
+
 export const supabase = new Proxy({} as SupabaseClient, {
   get(_target, property, receiver) {
     const client = getSupabaseClient();

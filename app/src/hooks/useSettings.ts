@@ -3,6 +3,7 @@ import type { CompanySettings } from '../types';
 import { SETTINGS_KEY } from '../constants';
 import { readSettings, withTimeout } from '../utils';
 import { supabase } from '../supabaseClient';
+import { restSelect } from '../supabaseRest';
 
 interface UseSettingsOptions {
   userId?: string;
@@ -24,6 +25,7 @@ interface CompanySettingsRow {
 const SETTINGS_ROW_ID = 'default';
 const SETTINGS_LOAD_TIMEOUT_MS = 5000;
 const SETTINGS_SAVE_TIMEOUT_MS = 8000;
+const SETTINGS_LOAD_DELAY_MS = 1200;
 
 function toNumber(value: number | null | undefined) {
   return Number(value || 0);
@@ -73,6 +75,9 @@ export function useSettings({ userId, isAdmin, profileReady }: UseSettingsOption
     if (!profileReady) return;
 
     let cancelled = false;
+    const timer = window.setTimeout(() => {
+      void loadCompanySettings();
+    }, SETTINGS_LOAD_DELAY_MS);
 
     async function loadCompanySettings() {
       const cached = readSettings();
@@ -86,20 +91,19 @@ export function useSettings({ userId, isAdmin, profileReady }: UseSettingsOption
       }
 
       try {
-        const { data, error } = await withTimeout(
-          supabase
-            .from('nastroiki_kompanii')
-            .select('company_name, manager_name, phone, email, avatar_url, default_margin_percent, default_discount_percent, pdf_note')
-            .eq('id', SETTINGS_ROW_ID)
-            .maybeSingle(),
+        const rows = await withTimeout(
+          restSelect<CompanySettingsRow>('nastroiki_kompanii', {
+            select: 'company_name, manager_name, phone, email, avatar_url, default_margin_percent, default_discount_percent, pdf_note',
+            filters: { id: SETTINGS_ROW_ID },
+            limit: 1,
+          }),
           'Настройки компании',
           SETTINGS_LOAD_TIMEOUT_MS
         );
 
-        if (error) throw error;
         if (cancelled) return;
 
-        setSettings(mapRowToSettings((data || null) as CompanySettingsRow | null, cached));
+        setSettings(mapRowToSettings(rows[0] || null, cached));
         setSyncSource('supabase');
         setSyncError('');
       } catch (error) {
@@ -119,9 +123,9 @@ export function useSettings({ userId, isAdmin, profileReady }: UseSettingsOption
       }
     }
 
-    loadCompanySettings();
     return () => {
       cancelled = true;
+      window.clearTimeout(timer);
     };
   }, [isAdmin, profileReady, userId]);
 
@@ -159,7 +163,7 @@ export function useSettings({ userId, isAdmin, profileReady }: UseSettingsOption
   ]);
 
   function updateSettings(patch: Partial<CompanySettings>) {
-    setSettings(prev => ({ ...prev, ...patch }));
+    setSettings((prev) => ({ ...prev, ...patch }));
   }
 
   function handleAvatar(file?: File) {
@@ -167,7 +171,7 @@ export function useSettings({ userId, isAdmin, profileReady }: UseSettingsOption
 
     const reader = new FileReader();
     reader.onload = () => {
-      setSettings(prev => ({ ...prev, avatarDataUrl: String(reader.result || '') }));
+      setSettings((prev) => ({ ...prev, avatarDataUrl: String(reader.result || '') }));
     };
     reader.readAsDataURL(file);
   }

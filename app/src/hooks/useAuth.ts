@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { supabase } from '../supabaseClient';
+import { restSelect } from '../supabaseRest';
 import type { AuthState, UserProfile } from '../types';
 import { withTimeout } from '../utils';
 
@@ -101,7 +102,6 @@ export function useAuth(): AuthState & {
 
       const nextUserId = session?.user.id || '';
       const nextUserEmail = session?.user.email || '';
-
       const hasResolvedSameUser = Boolean(
         nextUserId
         && nextUserEmail
@@ -140,22 +140,19 @@ export function useAuth(): AuthState & {
       }
 
       try {
-        const { data, error } = await withTimeout(
-          supabase
-            .from('profiles')
-            .select('id, display_name, avatar_url, role')
-            .eq('id', nextUserId)
-            .single(),
+        const rows = await withTimeout(
+          restSelect<UserProfile>('profiles', {
+            select: 'id, display_name, avatar_url, role',
+            filters: { id: nextUserId },
+            limit: 1,
+          }),
           'Профиль пользователя',
           PROFILE_TIMEOUT_MS
         );
 
         if (!isActive || nextRequestId !== requestId) return;
 
-        const resolvedProfile = error
-          ? fallbackProfile(nextUserId, nextUserEmail)
-          : data as UserProfile;
-
+        const resolvedProfile = rows[0] || fallbackProfile(nextUserId, nextUserEmail);
         setProfile(resolvedProfile);
         profileRef.current = resolvedProfile;
         writeCachedProfile(nextUserId, nextUserEmail, resolvedProfile);
@@ -198,14 +195,14 @@ export function useAuth(): AuthState & {
 
     const { data, error } = await supabase.auth.signInWithPassword({
       email: trimmedEmail,
-      password: trimmedPassword
+      password: trimmedPassword,
     });
 
     if (error) return { error: error.message };
 
     if (!data.session) {
       return {
-        notice: 'Данные приняты, но сессия не создана. Обычно это значит, что нужно подтвердить email в письме от Supabase.'
+        notice: 'Данные приняты, но сессия не создана. Обычно это значит, что нужно подтвердить email в письме от Supabase.',
       };
     }
 
@@ -221,14 +218,14 @@ export function useAuth(): AuthState & {
 
     const { data, error } = await supabase.auth.signUp({
       email: trimmedEmail,
-      password: trimmedPassword
+      password: trimmedPassword,
     });
 
     if (error) return { error: error.message };
 
     if (!data.session) {
       return {
-        notice: 'Аккаунт создан, но Supabase ждёт подтверждение email. Проверь почту, затем вернись сюда и нажми "Войти". Для разработки можно отключить подтверждение в Supabase: Authentication → Providers → Email → Confirm email = off.'
+        notice: 'Аккаунт создан, но Supabase ждёт подтверждение email. Проверь почту, затем вернись сюда и нажми "Войти". Для разработки можно отключить подтверждение в Supabase: Authentication -> Providers -> Email -> Confirm email = off.',
       };
     }
 
@@ -253,6 +250,6 @@ export function useAuth(): AuthState & {
     isApproved: profile?.role === 'admin' || profile?.role === 'manager',
     login,
     register,
-    logout
+    logout,
   };
 }
