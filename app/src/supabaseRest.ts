@@ -1,6 +1,8 @@
-import { supabase, supabaseAnonKey, supabaseUrl } from './supabaseClient';
+import { supabase } from './supabaseClient';
 
-type RestFilters = Record<string, string | number | boolean | null | undefined>;
+type RestScalar = string | number | boolean;
+type RestFilters = Record<string, RestScalar | null | undefined>;
+type RestRow = Record<string, unknown>;
 
 interface RestSelectOptions {
   select: string;
@@ -22,110 +24,74 @@ interface RestMutationOptions {
   returning?: 'minimal' | 'representation';
 }
 
-// Приложение теперь собирается как статический Next.js export.
-// У такого режима нет локального Vite proxy, поэтому REST идёт напрямую в Supabase.
-const restBaseUrl = `${supabaseUrl}/rest/v1`;
-const projectRef = (() => {
-  try {
-    return new URL(supabaseUrl).hostname.split('.')[0] || '';
-  } catch {
-    return '';
-  }
-})();
-const authStorageKey = projectRef ? `sb-${projectRef}-auth-token` : '';
+const CACHE_TTL = 30000;
+const restCache = new Map<string, { data: unknown; timestamp: number }>();
 
-function readAccessTokenFromStorage() {
-  if (typeof window === 'undefined' || !authStorageKey) return null;
+type EqCapable<T> = {
+  eq: (column: string, value: RestScalar) => T;
+};
 
-  try {
-    const rawValue = window.localStorage.getItem(authStorageKey);
-    if (!rawValue) return null;
+type OrCapable<T> = {
+  or: (filters: string) => T;
+};
 
-    const parsed = JSON.parse(rawValue) as { access_token?: unknown };
-    return typeof parsed.access_token === 'string' && parsed.access_token
-      ? parsed.access_token
-      : null;
-  } catch {
-    return null;
-  }
+type OrderCapable<T> = {
+  order: (column: string, options?: { ascending?: boolean }) => T;
+};
+
+function hasFilterValue(value: RestScalar | null | undefined) {
+  return value !== undefined && value !== null && value !== '';
 }
 
-async function resolveAccessToken() {
-  // После холодной загрузки Supabase иногда восстанавливает сессию чуть позже,
-  // чем страница успевает запросить данные через REST. Берём токен напрямую
-  // из localStorage, чтобы экран смет не зависал в вечной загрузке.
-  const storedToken = readAccessTokenFromStorage();
-  if (storedToken) return storedToken;
-
-  try {
-    const session = await Promise.race([
-      supabase.auth.getSession().then(({ data }) => data.session),
-      new Promise<null>((resolve) => setTimeout(() => resolve(null), 1500)),
-    ]);
-
-    return session?.access_token || supabaseAnonKey;
-  } catch {
-    return supabaseAnonKey;
-  }
+function normalizeError(table: string, error: { message: string; details?: string | null; hint?: string | null }) {
+  const parts = [`${table}: ${error.message}`];
+  if (error.details) parts.push(error.details);
+  if (error.hint) parts.push(error.hint);
+  return parts.join(' · ');
 }
 
-async function buildRestHeaders(extra?: HeadersInit): Promise<HeadersInit> {
-  const token = await resolveAccessToken();
+function applyFilters<T extends EqCapable<T>>(query: T, filters?: RestFilters): T {
+  let nextQuery = query;
 
-  return {
-    apikey: supabaseAnonKey,
-    Authorization: `Bearer ${token}`,
-    Accept: 'application/json',
-    ...extra,
-  };
-}
-
-function appendFilters(params: URLSearchParams, filters?: RestFilters) {
   Object.entries(filters || {}).forEach(([key, value]) => {
-    if (value === undefined || value === null || value === '') return;
-    params.append(key, `eq.${String(value)}`);
+    if (!hasFilterValue(value)) return;
+    nextQuery = nextQuery.eq(key, value as RestScalar);
   });
+
+  return nextQuery;
 }
 
-function appendSearch(params: URLSearchParams, search?: string) {
-  if (!search) return;
+function applySearch<T extends OrCapable<T>>(query: T, search?: string): T {
+  if (!search) return query;
 
   const pattern = `*${search}*`;
-  params.append(
-    'or',
-    `(id.ilike.${pattern},name.ilike.${pattern},category.ilike.${pattern},subcategory.ilike.${pattern})`
+  return query.or(
+    `id.ilike.${pattern},name.ilike.${pattern},category.ilike.${pattern},subcategory.ilike.${pattern}`
   );
 }
 
-function buildRestUrl(table: string, options: RestSelectOptions) {
-  const params = new URLSearchParams();
-  params.set('select', options.select);
-  if (options.order) params.set('order', options.order);
-  if (typeof options.limit === 'number') params.set('limit', String(options.limit));
-  if (typeof options.offset === 'number') params.set('offset', String(options.offset));
-  appendFilters(params, options.filters);
-  appendSearch(params, options.search);
+function applyOrder<T extends OrderCapable<T>>(query: T, order?: string): T {
+  if (!order) return query;
 
-  return `${restBaseUrl}/${table}?${params.toString()}`;
+  let nextQuery = query;
+  order
+    .split(',')
+    .map((segment) => segment.trim())
+    .filter(Boolean)
+    .forEach((segment) => {
+      const [column, direction = 'asc'] = segment.split('.');
+      nextQuery = nextQuery.order(column, { ascending: direction !== 'desc' });
+    });
+
+  return nextQuery;
 }
-
-function buildMutationUrl(table: string, options: RestMutationOptions = {}) {
-  const params = new URLSearchParams();
-  if (options.select) params.set('select', options.select);
-  appendFilters(params, options.filters);
-
-  return `${restBaseUrl}/${table}${params.toString() ? `?${params.toString()}` : ''}`;
-}
-
-const CACHE_TTL = 30000;
-const REQUEST_TIMEOUT_MS = 15000;
-const restCache = new Map<string, { data: unknown; timestamp: number }>();
 
 function getCached<T>(key: string): T | null {
   const cached = restCache.get(key);
   if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
     return cached.data as T;
   }
+
   return null;
 }
 
@@ -133,179 +99,124 @@ function setCache(key: string, data: unknown) {
   restCache.set(key, { data, timestamp: Date.now() });
 }
 
-function countCacheKey(url: string) {
-  return `count:${url}`;
+function buildCacheKey(table: string, action: string, payload: unknown) {
+  return `${table}:${action}:${JSON.stringify(payload)}`;
 }
 
-function readCountFromResponse(response: Response): number | null {
-  const contentRange = response.headers.get('content-range') || '';
-  const total = Number(contentRange.split('/').pop() || '');
-
-  return Number.isFinite(total) ? total : null;
-}
-
-async function fetchWithTimeout(input: string, init: RequestInit): Promise<Response> {
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
-
-  try {
-    return await fetch(input, {
-      ...init,
-      signal: controller.signal,
-    });
-  } catch (error) {
-    if (error instanceof DOMException && error.name === 'AbortError') {
-      throw new Error(`Request timeout after ${REQUEST_TIMEOUT_MS}ms`);
-    }
-
-    throw error;
-  } finally {
-    clearTimeout(timeoutId);
-  }
+function countCacheKey(table: string, filters?: RestFilters) {
+  return buildCacheKey(table, 'count', filters || {});
 }
 
 export async function restSelect<T>(table: string, options: RestSelectOptions): Promise<T[]> {
-  const url = buildRestUrl(table, options);
-  const cached = getCached<T[]>(url);
+  const cacheKey = buildCacheKey(table, 'select', options);
+  const cached = getCached<T[]>(cacheKey);
   if (cached) return cached;
 
-  const response = await fetchWithTimeout(url, {
-    headers: await buildRestHeaders(),
-    cache: 'no-store',
-  });
+  let query = supabase.from(table).select(options.select);
+  query = applyFilters(query, options.filters);
+  query = applySearch(query, options.search);
+  query = applyOrder(query, options.order);
 
-  if (!response.ok) {
-    const text = await response.text();
-    throw new Error(`${table}: ${response.status} ${response.statusText}${text ? ` · ${text}` : ''}`);
+  if (typeof options.limit === 'number' && typeof options.offset === 'number') {
+    query = query.range(options.offset, options.offset + options.limit - 1);
+  } else if (typeof options.limit === 'number') {
+    query = query.limit(options.limit);
+  } else if (typeof options.offset === 'number') {
+    query = query.range(options.offset, options.offset + 999);
   }
 
-  const data = await response.json() as T[];
-  setCache(url, data);
-  return data;
+  const { data, error } = await query;
+  if (error) {
+    throw new Error(normalizeError(table, error));
+  }
+
+  const rows = (data || []) as T[];
+  setCache(cacheKey, rows);
+  return rows;
 }
 
-export async function restInsert<T>(table: string, rows: unknown | unknown[], options: RestInsertOptions = {}): Promise<T[]> {
+export async function restInsert<T>(table: string, rows: RestRow | RestRow[], options: RestInsertOptions = {}): Promise<T[]> {
   restCache.clear();
-  const params = new URLSearchParams();
-  if (options.select) params.set('select', options.select);
 
-  const url = `${restBaseUrl}/${table}${params.toString() ? `?${params.toString()}` : ''}`;
-  const response = await fetchWithTimeout(url, {
-    method: 'POST',
-    cache: 'no-store',
-    headers: await buildRestHeaders({
-      'Content-Type': 'application/json',
-      Prefer: options.returning === 'minimal' ? 'return=minimal' : 'return=representation',
-    }),
-    body: JSON.stringify(rows),
-  });
+  let query = supabase.from(table).insert(rows);
 
-  if (!response.ok) {
-    const text = await response.text();
-    throw new Error(`${table}: ${response.status} ${response.statusText}${text ? ` · ${text}` : ''}`);
+  if (options.select) {
+    const { data, error } = await query.select(options.select);
+    if (error) throw new Error(normalizeError(table, error));
+    return (Array.isArray(data) ? data : [data]) as T[];
   }
 
-  if (response.status === 204) return [];
-  const data = await response.json();
-  return (Array.isArray(data) ? data : [data]) as T[];
+  if (options.returning === 'representation') {
+    const { data, error } = await query.select();
+    if (error) throw new Error(normalizeError(table, error));
+    return (Array.isArray(data) ? data : [data]) as T[];
+  }
+
+  const { error } = await query;
+  if (error) throw new Error(normalizeError(table, error));
+  return [];
 }
 
-export async function restUpdate<T>(table: string, patch: unknown, options: RestMutationOptions = {}): Promise<T[]> {
+export async function restUpdate<T>(table: string, patch: RestRow, options: RestMutationOptions = {}): Promise<T[]> {
   restCache.clear();
-  const response = await fetchWithTimeout(buildMutationUrl(table, options), {
-    method: 'PATCH',
-    cache: 'no-store',
-    headers: await buildRestHeaders({
-      'Content-Type': 'application/json',
-      Prefer: options.returning === 'minimal' ? 'return=minimal' : 'return=representation',
-    }),
-    body: JSON.stringify(patch),
-  });
 
-  if (!response.ok) {
-    const text = await response.text();
-    throw new Error(`${table}: ${response.status} ${response.statusText}${text ? ` · ${text}` : ''}`);
+  let query = supabase.from(table).update(patch);
+  query = applyFilters(query, options.filters);
+
+  if (options.select) {
+    const { data, error } = await query.select(options.select);
+    if (error) throw new Error(normalizeError(table, error));
+    return (Array.isArray(data) ? data : [data]) as T[];
   }
 
-  if (response.status === 204) return [];
-  const data = await response.json();
-  return (Array.isArray(data) ? data : [data]) as T[];
+  if (options.returning === 'representation') {
+    const { data, error } = await query.select();
+    if (error) throw new Error(normalizeError(table, error));
+    return (Array.isArray(data) ? data : [data]) as T[];
+  }
+
+  const { error } = await query;
+  if (error) throw new Error(normalizeError(table, error));
+  return [];
 }
 
 export async function restDelete<T>(table: string, options: RestMutationOptions = {}): Promise<T[]> {
   restCache.clear();
-  const response = await fetchWithTimeout(buildMutationUrl(table, options), {
-    method: 'DELETE',
-    cache: 'no-store',
-    headers: await buildRestHeaders({
-      Prefer: options.returning === 'minimal' ? 'return=minimal' : 'return=representation',
-    }),
-  });
 
-  if (!response.ok) {
-    const text = await response.text();
-    throw new Error(`${table}: ${response.status} ${response.statusText}${text ? ` · ${text}` : ''}`);
+  let query = supabase.from(table).delete();
+  query = applyFilters(query, options.filters);
+
+  if (options.select) {
+    const { data, error } = await query.select(options.select);
+    if (error) throw new Error(normalizeError(table, error));
+    return (Array.isArray(data) ? data : [data]) as T[];
   }
 
-  if (response.status === 204) return [];
-  const data = await response.json();
-  return (Array.isArray(data) ? data : [data]) as T[];
+  if (options.returning === 'representation') {
+    const { data, error } = await query.select();
+    if (error) throw new Error(normalizeError(table, error));
+    return (Array.isArray(data) ? data : [data]) as T[];
+  }
+
+  const { error } = await query;
+  if (error) throw new Error(normalizeError(table, error));
+  return [];
 }
 
 export async function restCount(table: string, filters?: RestFilters): Promise<number> {
-  const params = new URLSearchParams();
-  params.set('select', 'id');
-  appendFilters(params, filters);
-
-  const url = `${restBaseUrl}/${table}?${params.toString()}`;
-  const cacheKey = countCacheKey(url);
+  const cacheKey = countCacheKey(table, filters);
   const cached = getCached<number>(cacheKey);
   if (cached !== null) return cached;
 
-  const headers = await buildRestHeaders({ Prefer: 'count=exact' });
+  let query = supabase.from(table).select('id', { count: 'exact', head: true });
+  query = applyFilters(query, filters);
 
-  try {
-    // HEAD is faster, but some environments reject it because of CORS or proxy rules.
-    // We try it first and then transparently fall back to GET.
-    const headResponse = await fetchWithTimeout(url, {
-      method: 'HEAD',
-      cache: 'no-store',
-      headers,
-    });
-
-    if (headResponse.ok) {
-      const result = readCountFromResponse(headResponse);
-      if (result !== null) {
-        setCache(cacheKey, result);
-        return result;
-      }
-    }
-  } catch {
-    // Ignore and continue with GET fallback below.
+  const { count, error } = await query;
+  if (error) {
+    throw new Error(normalizeError(table, error));
   }
 
-  const getResponse = await fetchWithTimeout(url, {
-    method: 'GET',
-    cache: 'no-store',
-    headers: {
-      ...headers,
-      Range: '0-0',
-      'Range-Unit': 'items',
-    },
-  });
-
-  if (!getResponse.ok) {
-    throw new Error(`${table}: ${getResponse.status} ${getResponse.statusText}`);
-  }
-
-  const rangedCount = readCountFromResponse(getResponse);
-  if (rangedCount !== null) {
-    setCache(cacheKey, rangedCount);
-    return rangedCount;
-  }
-
-  const rows = await getResponse.json() as unknown[];
-  const fallbackCount = Array.isArray(rows) ? rows.length : 0;
-  setCache(cacheKey, fallbackCount);
-  return fallbackCount;
+  const resolvedCount = count || 0;
+  setCache(cacheKey, resolvedCount);
+  return resolvedCount;
 }
