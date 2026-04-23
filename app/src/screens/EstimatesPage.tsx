@@ -55,7 +55,7 @@ import {
 } from '../features/estimates/calculationEngine';
 import { cleanSearch, money } from '../utils';
 import { restDelete, restInsert, restSelect, restUpdate } from '../supabaseRest';
-import { supabase } from '../supabaseClient';
+import { readStoredAuthUser, supabase } from '../supabaseClient';
 
 interface EstimatesPageProps {
   auth: AuthState;
@@ -200,6 +200,8 @@ function reindexPositions(positions: SavedEstimatePosition[]) {
 }
 
 export default function EstimatesPage({ auth, settings }: EstimatesPageProps) {
+  const storedUser = readStoredAuthUser();
+  const resolvedUserId = auth.userId || storedUser?.id || '';
   const theme = useTheme();
   const isCompactLayout = useMediaQuery(theme.breakpoints.down('md'));
 
@@ -322,13 +324,13 @@ export default function EstimatesPage({ auth, settings }: EstimatesPageProps) {
   }, [selectedId]);
 
   useEffect(() => {
-    if (!auth.userId) {
+    if (!resolvedUserId) {
       setLoading(false);
       return;
     }
 
     void loadEstimates();
-  }, [auth.userId, loadEstimates]);
+  }, [resolvedUserId, loadEstimates]);
 
   useEffect(() => {
     setEstimateDraft(estimateDraftOf(selectedEstimate));

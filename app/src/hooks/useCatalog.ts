@@ -1,5 +1,6 @@
 import { useEffect, useState, useCallback } from 'react';
 import { restCount, restSelect } from '../supabaseRest';
+import { readStoredAuthUser } from '../supabaseClient';
 import type {
   CatalogItem,
   CatalogType,
@@ -29,6 +30,9 @@ interface UseCatalogOptions {
 }
 
 export function useCatalog({ authReady, userId, userEmail }: UseCatalogOptions) {
+  const storedUser = readStoredAuthUser();
+  const resolvedUserId = userId || storedUser?.id || '';
+  const resolvedUserEmail = userEmail || storedUser?.email || '';
   const [items, setItems] = useState<CatalogItem[]>([]);
   const [itemsTotal, setItemsTotal] = useState(0);
   const [hasNextPage, setHasNextPage] = useState(false);
@@ -92,7 +96,7 @@ export function useCatalog({ authReady, userId, userEmail }: UseCatalogOptions) 
 
   // Clear state when not authenticated
   useEffect(() => {
-    if (!authReady || !userEmail) {
+    if (!authReady || !resolvedUserEmail) {
       setItems([]);
       setItemsTotal(0);
       setHasNextPage(false);
@@ -101,7 +105,7 @@ export function useCatalog({ authReady, userId, userEmail }: UseCatalogOptions) 
       setNodeComponents({});
       return;
     }
-    if (!userId) return;
+    if (!resolvedUserId) return;
 
     let cancelled = false;
 
@@ -130,11 +134,11 @@ export function useCatalog({ authReady, userId, userEmail }: UseCatalogOptions) 
     });
 
     return () => { cancelled = true; };
-  }, [authReady, userEmail, userId, catalogRefresh]);
+  }, [authReady, resolvedUserEmail, resolvedUserId, catalogRefresh]);
 
   // Load categories
   useEffect(() => {
-    if (!authReady || !userEmail || !userId) return;
+    if (!authReady || !resolvedUserEmail || !resolvedUserId) return;
 
     let cancelled = false;
 
@@ -163,11 +167,11 @@ export function useCatalog({ authReady, userId, userEmail }: UseCatalogOptions) 
 
     loadCategories();
     return () => { cancelled = true; };
-  }, [authReady, userEmail, userId, activeType, catalogRefresh]);
+  }, [authReady, resolvedUserEmail, resolvedUserId, activeType, catalogRefresh]);
 
   // Load page items
   useEffect(() => {
-    if (!authReady || !userEmail || !userId) return;
+    if (!authReady || !resolvedUserEmail || !resolvedUserId) return;
 
     let cancelled = false;
 
@@ -218,7 +222,7 @@ export function useCatalog({ authReady, userId, userEmail }: UseCatalogOptions) 
 
     loadPage();
     return () => { cancelled = true; };
-  }, [authReady, userEmail, userId, activeType, activeCategory, activeSubcategory, debouncedSearch, page, catalogRefresh, activeCount, filterIsActive]);
+  }, [authReady, resolvedUserEmail, resolvedUserId, activeType, activeCategory, activeSubcategory, debouncedSearch, page, catalogRefresh, activeCount, filterIsActive]);
 
   async function loadNodeComponents(nodeId: string, force = false) {
     if (!force && nodeComponents[nodeId]) return nodeComponents[nodeId];

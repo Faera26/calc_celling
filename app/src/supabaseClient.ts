@@ -4,6 +4,14 @@ import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 
 const DEFAULT_SUPABASE_URL = 'https://rreqijywlhsodppwebjy.supabase.co';
 const DEFAULT_SUPABASE_ANON_KEY = 'sb_publishable_aVVYUkx_p3xW3a--cm57oA_s-n5IsFU';
+const projectRef = (() => {
+  try {
+    return new URL(DEFAULT_SUPABASE_URL).hostname.split('.')[0] || '';
+  } catch {
+    return '';
+  }
+})();
+const authStorageKey = projectRef ? `sb-${projectRef}-auth-token` : '';
 
 let browserSupabaseClient: SupabaseClient | null = null;
 
@@ -48,6 +56,27 @@ export function getSupabaseClient() {
   }
 
   return browserSupabaseClient;
+}
+
+export function readStoredAuthUser() {
+  if (typeof window === 'undefined' || !authStorageKey) return null;
+
+  try {
+    const rawValue = window.localStorage.getItem(authStorageKey);
+    if (!rawValue) return null;
+
+    const parsed = JSON.parse(rawValue) as {
+      user?: { id?: unknown; email?: unknown };
+    };
+
+    const id = typeof parsed.user?.id === 'string' ? parsed.user.id : '';
+    const email = typeof parsed.user?.email === 'string' ? parsed.user.email : '';
+    if (!id || !email) return null;
+
+    return { id, email };
+  } catch {
+    return null;
+  }
 }
 
 export const supabase = new Proxy({} as SupabaseClient, {
