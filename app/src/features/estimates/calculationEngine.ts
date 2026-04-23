@@ -419,20 +419,24 @@ export function normalizeSavedEstimatePositions(
   validRoomIds: Set<string>
 ): SavedEstimatePosition[] {
   return positions.map((position, index) => {
-    const qty = toNumber(position.qty);
-    const price = toNumber(position.price);
-    const roomId = position.room_id && validRoomIds.has(position.room_id) ? position.room_id : null;
+    const recalculatedPosition = recalculateSavedEstimatePosition(position, {
+      position_index: index + 1,
+    });
+    const qty = toNumber(recalculatedPosition.qty);
+    const price = toNumber(recalculatedPosition.price);
+    const roomId = recalculatedPosition.room_id && validRoomIds.has(recalculatedPosition.room_id)
+      ? recalculatedPosition.room_id
+      : null;
 
     return {
-      ...position,
-      position_index: index + 1,
+      ...recalculatedPosition,
       room_id: roomId,
       qty,
       price,
       total: roundPrice(qty * price),
-      item_snapshot: normalizeItemSnapshot(position.item_snapshot, position),
-      components_snapshot: normalizeComponentSnapshots(position.components_snapshot),
-      source_snapshot: normalizeSourceSnapshot(position.source_snapshot),
+      item_snapshot: normalizeItemSnapshot(recalculatedPosition.item_snapshot, recalculatedPosition),
+      components_snapshot: normalizeComponentSnapshots(recalculatedPosition.components_snapshot),
+      source_snapshot: normalizeSourceSnapshot(recalculatedPosition.source_snapshot),
     };
   });
 }
@@ -459,25 +463,29 @@ export function buildSavedEstimateRoomPayloads(estimateId: string, rooms: SavedE
 }
 
 export function buildSavedEstimatePositionPayloads(estimateId: string, positions: SavedEstimatePosition[]) {
-  return positions.map((position) => ({
-    id: position.id,
-    smeta_id: estimateId,
-    position_index: position.position_index,
-    room_id: position.room_id || null,
-    item_type: position.item_type,
-    item_id: position.item_id,
-    item_name: position.item_name,
-    qty: toNumber(position.qty),
-    unit: normalizeText(position.unit) || 'шт.',
-    base_price: toNumber(position.base_price ?? position.price),
-    price: toNumber(position.price),
-    total: roundPrice(toNumber(position.total)),
-    category: normalizeText(position.category),
-    subcategory: normalizeText(position.subcategory),
-    item_snapshot: normalizeItemSnapshot(position.item_snapshot, position),
-    components_snapshot: normalizeComponentSnapshots(position.components_snapshot),
-    source_snapshot: normalizeSourceSnapshot(position.source_snapshot),
-  }));
+  return positions.map((position) => {
+    const syncedPosition = synchronizeSavedEstimatePositionSnapshot(position);
+
+    return {
+      id: syncedPosition.id,
+      smeta_id: estimateId,
+      position_index: syncedPosition.position_index,
+      room_id: syncedPosition.room_id || null,
+      item_type: syncedPosition.item_type,
+      item_id: syncedPosition.item_id,
+      item_name: syncedPosition.item_name,
+      qty: toNumber(syncedPosition.qty),
+      unit: normalizeText(syncedPosition.unit) || 'шт.',
+      base_price: toNumber(syncedPosition.base_price ?? syncedPosition.price),
+      price: toNumber(syncedPosition.price),
+      total: roundPrice(toNumber(syncedPosition.total)),
+      category: normalizeText(syncedPosition.category),
+      subcategory: normalizeText(syncedPosition.subcategory),
+      item_snapshot: normalizeItemSnapshot(syncedPosition.item_snapshot, syncedPosition),
+      components_snapshot: normalizeComponentSnapshots(syncedPosition.components_snapshot),
+      source_snapshot: normalizeSourceSnapshot(syncedPosition.source_snapshot),
+    };
+  });
 }
 
 export function summarizeSavedEstimatePositions(positions: SavedEstimatePosition[]) {
@@ -492,6 +500,22 @@ export function summarizeSavedEstimatePositions(positions: SavedEstimatePosition
     itemsCount: 0,
     componentsCount: 0,
   });
+}
+
+export function recalculateSavedEstimatePosition(
+  position: SavedEstimatePosition,
+  patch: Partial<SavedEstimatePosition> = {}
+): SavedEstimatePosition {
+  const next = { ...position, ...patch };
+  const qty = toNumber(next.qty);
+  const price = toNumber(next.price);
+
+  return {
+    ...next,
+    qty,
+    price,
+    total: roundPrice(qty * price),
+  };
 }
 
 export function createSavedEstimatePosition(input: CreateSavedEstimatePositionInput): SavedEstimatePosition {
@@ -942,12 +966,58 @@ function normalizeComponentSnapshots(components: SavedEstimatePosition['componen
     unit: component.unit || 'шт.',
     price: toNumber(component.price),
     total: roundPrice(toNumber(component.total) || toNumber(component.price) * toNumber(component.qty)),
-    base_price: toOptionalNumber(component.base_price),
+    base_price: toOptionalNumber('base_price' in component ? component.base_price : null),
     category: normalizeText(component.category),
     subcategory: normalizeText(component.subcategory),
     image: typeof component.image === 'string' ? component.image : null,
     comment: typeof component.comment === 'string' ? component.comment : null,
   }));
+}
+
+function synchronizeSavedEstimatePositionSnapshot(
+  position: SavedEstimatePosition,
+  savedAt = new Date().toISOString()
+): SavedEstimatePosition {
+  const recalculatedPosition = recalculateSavedEstimatePosition(position);
+  const itemName = normalizeText(recalculatedPosition.item_name) || 'Без названия';
+  const unit = normalizeText(recalculatedPosition.unit) || 'шт.';
+  const category = normalizeText(recalculatedPosition.category);
+  const subcategory = normalizeText(recalculatedPosition.subcategory);
+  const basePrice = toOptionalNumber(recalculatedPosition.base_price ?? recalculatedPosition.price);
+  const itemSnapshot = normalizeItemSnapshot(recalculatedPosition.item_snapshot, recalculatedPosition);
+  const sourceSnapshot = normalizeSourceSnapshot(recalculatedPosition.source_snapshot);
+
+  return {
+    ...recalculatedPosition,
+    unit,
+    category,
+    subcategory,
+    base_price: basePrice,
+    item_snapshot: {
+      ...itemSnapshot,
+      item_type: recalculatedPosition.item_type,
+      item_id: recalculatedPosition.item_id,
+      name: itemName,
+      category,
+      subcategory,
+      unit,
+      image: itemSnapshot.image ?? sourceSnapshot.image ?? null,
+      description: itemSnapshot.description ?? sourceSnapshot.description ?? null,
+      source: itemSnapshot.source ?? sourceSnapshot.source ?? null,
+      base_price: basePrice,
+      saved_price: recalculatedPosition.price,
+      saved_at: savedAt,
+    },
+    source_snapshot: normalizeSourceSnapshot({
+      ...sourceSnapshot,
+      name: itemName,
+      category,
+      subcategory,
+      unit,
+      base_price: basePrice,
+    }),
+    components_snapshot: normalizeComponentSnapshots(recalculatedPosition.components_snapshot),
+  };
 }
 
 function normalizeItemSnapshot(

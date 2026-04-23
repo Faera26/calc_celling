@@ -5,3 +5,7 @@ app/*.local
 app/.env
 .agents/
 *.md
+!README.md
+!app/README.md
+!app/ARCHITECTURE.md
+!infra/supabase/README.md

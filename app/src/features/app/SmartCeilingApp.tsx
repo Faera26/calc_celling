@@ -119,30 +119,34 @@ export default function SmartCeilingApp({ page }: SmartCeilingAppProps) {
         {renderPage()}
       </AppLayout>
 
-      <CartDrawer
-        open={cart.isCartOpen}
-        onClose={() => cart.setIsCartOpen(false)}
-        userId={auth.userId}
-        cartRows={cart.cartRows}
-        cartCount={cart.cartCount}
-        subtotal={cart.subtotal}
-        settings={settings.settings}
-        onAddToCart={cart.addToCart}
-        onRemoveFromCart={cart.removeFromCart}
-        onClearCart={cart.clearCart}
-      />
+      {cart.isCartOpen && (
+        <CartDrawer
+          open={cart.isCartOpen}
+          onClose={() => cart.setIsCartOpen(false)}
+          userId={auth.userId}
+          cartRows={cart.cartRows}
+          cartCount={cart.cartCount}
+          subtotal={cart.subtotal}
+          settings={settings.settings}
+          onAddToCart={cart.addToCart}
+          onRemoveFromCart={cart.removeFromCart}
+          onClearCart={cart.clearCart}
+        />
+      )}
 
-      <SettingsDrawer
-        open={settings.isSettingsOpen}
-        onClose={() => settings.setIsSettingsOpen(false)}
-        settings={settings.settings}
-        onUpdate={settings.updateSettings}
-        onAvatar={settings.handleAvatar}
-        isAdmin={auth.isAdmin}
-        onLogout={auth.logout}
-        syncSource={settings.syncSource}
-        syncError={settings.syncError}
-      />
+      {settings.isSettingsOpen && (
+        <SettingsDrawer
+          open={settings.isSettingsOpen}
+          onClose={() => settings.setIsSettingsOpen(false)}
+          settings={settings.settings}
+          onUpdate={settings.updateSettings}
+          onAvatar={settings.handleAvatar}
+          isAdmin={auth.isAdmin}
+          onLogout={auth.logout}
+          syncSource={settings.syncSource}
+          syncError={settings.syncError}
+        />
+      )}
     </>
   );
 }

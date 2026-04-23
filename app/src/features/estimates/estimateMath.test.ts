@@ -4,8 +4,10 @@ import type { CartRow, EstimateSaveDraft } from '../../types';
 import {
   buildEstimatePersistenceRows,
   buildEstimateRecordPayloads,
+  buildSavedEstimatePositionPayloads,
   calculateEstimate,
   createSavedEstimatePosition,
+  recalculateSavedEstimatePosition,
   summarizeSavedEstimatePositions,
   toNumber,
 } from './calculationEngine';
@@ -425,6 +427,62 @@ describe('calculationEngine', () => {
       itemsCount: 2,
       componentsCount: 1,
     });
+  });
+
+  it('пересобирает snapshot позиции при ручном редактировании перед сохранением', () => {
+    const original = createSavedEstimatePosition({
+      estimateId: 'estimate-1',
+      positionIndex: 1,
+      roomId: null,
+      name: 'Полотно MSD',
+      qty: '2',
+      unit: 'м²',
+      price: '500',
+      itemType: 'tovar',
+      itemId: 'canvas-1',
+      category: 'Потолки',
+      subcategory: 'Полотно',
+      source: 'catalog',
+      image: 'https://example.com/canvas.png',
+      description: 'Белое полотно',
+    });
+
+    const edited = recalculateSavedEstimatePosition(original, {
+      item_name: 'Полотно MSD Premium',
+      qty: 3,
+      price: 650,
+      category: 'Премиум',
+      subcategory: 'Ткань',
+      source_snapshot: {
+        ...original.source_snapshot,
+        description: 'Обновлённое описание',
+      },
+    });
+
+    const [payload] = buildSavedEstimatePositionPayloads('estimate-1', [edited]);
+
+    expect(payload).toMatchObject({
+      item_name: 'Полотно MSD Premium',
+      qty: 3,
+      price: 650,
+      total: 1950,
+      category: 'Премиум',
+      subcategory: 'Ткань',
+      item_snapshot: {
+        name: 'Полотно MSD Premium',
+        saved_price: 650,
+        category: 'Премиум',
+        subcategory: 'Ткань',
+        description: 'Белое полотно',
+      },
+      source_snapshot: {
+        name: 'Полотно MSD Premium',
+        category: 'Премиум',
+        subcategory: 'Ткань',
+        description: 'Обновлённое описание',
+      },
+    });
+    expect(payload.item_snapshot.saved_at).toBeTruthy();
   });
 
   it('безопасно преобразует пустые и некорректные значения в ноль', () => {

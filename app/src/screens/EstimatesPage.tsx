@@ -49,6 +49,7 @@ import {
   buildSavedEstimateRoomPayloads,
   createSavedEstimatePosition,
   normalizeSavedEstimatePositions,
+  recalculateSavedEstimatePosition,
   summarizeSavedEstimatePositions,
   toNumber as num,
 } from '../features/estimates/calculationEngine';
@@ -397,10 +398,7 @@ export default function EstimatesPage({ auth, settings }: EstimatesPageProps) {
   function updatePosition(positionId: string, patch: Partial<SavedEstimatePosition>) {
     setPositionDrafts((prev) => prev.map((position) => {
       if (position.id !== positionId) return position;
-      const next = { ...position, ...patch };
-      const qty = num(next.qty);
-      const price = num(next.price);
-      return { ...next, qty, price, total: qty * price };
+      return recalculateSavedEstimatePosition(position, patch);
     }));
   }
 
