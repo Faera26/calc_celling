@@ -165,8 +165,9 @@ export function formatError(error: unknown) {
 
 /* ---------- Timeout wrapper ---------- */
 
-export function withTimeout<T>(promise: PromiseLike<T>, label: string, ms = 60000): Promise<T> {
+export function withTimeout<T>(promise: PromiseLike<T>, label: string, ms = 10000): Promise<T> {
   return new Promise((resolve, reject) => {
+    // По умолчанию не держим экран в ожидании по минуте на одном запросе.
     const timer = window.setTimeout(() => {
       reject(new Error(`${label}: Supabase не ответил за ${Math.round(ms / 1000)} сек.`));
     }, ms);

@@ -1,8 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
 import { supabase } from '../supabaseClient';
 import type { AuthState, UserProfile } from '../types';
+import { withTimeout } from '../utils';
 
 const PROFILE_CACHE_KEY = 'smartceiling.profile.v1';
+const PROFILE_TIMEOUT_MS = 5000;
 
 interface CachedProfileState {
   userId: string;
@@ -138,11 +140,15 @@ export function useAuth(): AuthState & {
       }
 
       try {
-        const { data, error } = await supabase
-          .from('profiles')
-          .select('id, display_name, avatar_url, role')
-          .eq('id', nextUserId)
-          .single();
+        const { data, error } = await withTimeout(
+          supabase
+            .from('profiles')
+            .select('id, display_name, avatar_url, role')
+            .eq('id', nextUserId)
+            .single(),
+          'Профиль пользователя',
+          PROFILE_TIMEOUT_MS
+        );
 
         if (!isActive || nextRequestId !== requestId) return;
 

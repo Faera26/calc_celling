@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import type { CompanySettings } from '../types';
 import { SETTINGS_KEY } from '../constants';
-import { readSettings } from '../utils';
+import { readSettings, withTimeout } from '../utils';
 import { supabase } from '../supabaseClient';
 
 interface UseSettingsOptions {
@@ -22,6 +22,8 @@ interface CompanySettingsRow {
 }
 
 const SETTINGS_ROW_ID = 'default';
+const SETTINGS_LOAD_TIMEOUT_MS = 5000;
+const SETTINGS_SAVE_TIMEOUT_MS = 8000;
 
 function toNumber(value: number | null | undefined) {
   return Number(value || 0);
@@ -84,11 +86,15 @@ export function useSettings({ userId, isAdmin, profileReady }: UseSettingsOption
       }
 
       try {
-        const { data, error } = await supabase
-          .from('nastroiki_kompanii')
-          .select('company_name, manager_name, phone, email, avatar_url, default_margin_percent, default_discount_percent, pdf_note')
-          .eq('id', SETTINGS_ROW_ID)
-          .maybeSingle();
+        const { data, error } = await withTimeout(
+          supabase
+            .from('nastroiki_kompanii')
+            .select('company_name, manager_name, phone, email, avatar_url, default_margin_percent, default_discount_percent, pdf_note')
+            .eq('id', SETTINGS_ROW_ID)
+            .maybeSingle(),
+          'Настройки компании',
+          SETTINGS_LOAD_TIMEOUT_MS
+        );
 
         if (error) throw error;
         if (cancelled) return;
@@ -127,9 +133,13 @@ export function useSettings({ userId, isAdmin, profileReady }: UseSettingsOption
     if (!remoteReady || !userId || !isAdmin) return;
 
     const timer = window.setTimeout(async () => {
-      const { error } = await supabase.from('nastroiki_kompanii').upsert(buildRowPatch(settings), {
-        onConflict: 'id',
-      });
+      const { error } = await withTimeout(
+        supabase.from('nastroiki_kompanii').upsert(buildRowPatch(settings), {
+          onConflict: 'id',
+        }),
+        'Сохранение настроек компании',
+        SETTINGS_SAVE_TIMEOUT_MS
+      );
 
       if (error) {
         setSyncError(`Не удалось сохранить общие настройки компании в Supabase: ${error.message}`);
