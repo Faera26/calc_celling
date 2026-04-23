@@ -53,7 +53,7 @@ import {
   summarizeSavedEstimatePositions,
   toNumber as num,
 } from '../features/estimates/calculationEngine';
-import { cleanSearch, money } from '../utils';
+import { cleanSearch, money, withTimeout } from '../utils';
 import { restDelete, restInsert, restSelect, restUpdate } from '../supabaseRest';
 import { readStoredAuthUser, supabase } from '../supabaseClient';
 
@@ -105,6 +105,8 @@ interface CatalogSearchOption {
 }
 
 const COMMON_ROOM = 'common';
+const ESTIMATE_LIST_TIMEOUT_MS = 8000;
+const ESTIMATE_DETAILS_TIMEOUT_MS = 8000;
 
 function formatDate(value?: string | null) {
   if (!value) return '-';
@@ -295,19 +297,27 @@ export default function EstimatesPage({ auth, settings }: EstimatesPageProps) {
       let rows: SavedEstimate[];
 
       try {
-        rows = await restSelect<SavedEstimate>('smety', {
-          select: 'id,user_id,title,client_name,client_phone,client_email,object_address,client_comment,margin_percent,discount_percent,subtotal,total,status,document_type,pdf_template,pdf_accent_color,use_common_section,room_count,items_count,components_count,settings_snapshot,created_at,updated_at',
-          order: 'created_at.desc',
-          limit: 50,
-        });
+        rows = await withTimeout(
+          restSelect<SavedEstimate>('smety', {
+            select: 'id,user_id,title,client_name,client_phone,client_email,object_address,client_comment,margin_percent,discount_percent,subtotal,total,status,document_type,pdf_template,pdf_accent_color,use_common_section,room_count,items_count,components_count,settings_snapshot,created_at,updated_at',
+            order: 'created_at.desc',
+            limit: 50,
+          }),
+          'Список смет',
+          ESTIMATE_LIST_TIMEOUT_MS,
+        );
       } catch (loadError) {
         if (!isSchemaCacheError(loadError)) throw loadError;
 
-        rows = await restSelect<SavedEstimate>('smety', {
-          select: 'id,user_id,client_name,client_phone,margin_percent,discount_percent,subtotal,total,status,created_at,updated_at',
-          order: 'created_at.desc',
-          limit: 50,
-        });
+        rows = await withTimeout(
+          restSelect<SavedEstimate>('smety', {
+            select: 'id,user_id,client_name,client_phone,margin_percent,discount_percent,subtotal,total,status,created_at,updated_at',
+            order: 'created_at.desc',
+            limit: 50,
+          }),
+          'Список смет',
+          ESTIMATE_LIST_TIMEOUT_MS,
+        );
       }
 
       setEstimates(rows);
@@ -353,27 +363,39 @@ export default function EstimatesPage({ auth, settings }: EstimatesPageProps) {
       setNotice('');
 
       try {
-        const roomsPromise = restSelect<SavedEstimateRoom>('smeta_komnaty', {
-          select: 'id,smeta_id,position_index,name,area,perimeter,corners,light_points,pipes,curtain_tracks,niches,comment',
-          filters: { smeta_id: selectedEstimate.id },
-          order: 'position_index.asc',
-        }).catch((loadError) => {
+        const roomsPromise = withTimeout(
+          restSelect<SavedEstimateRoom>('smeta_komnaty', {
+            select: 'id,smeta_id,position_index,name,area,perimeter,corners,light_points,pipes,curtain_tracks,niches,comment',
+            filters: { smeta_id: selectedEstimate.id },
+            order: 'position_index.asc',
+          }),
+          'Комнаты сметы',
+          ESTIMATE_DETAILS_TIMEOUT_MS,
+        ).catch((loadError) => {
           if (isSchemaCacheError(loadError)) return [] as SavedEstimateRoom[];
           throw loadError;
         });
 
-        const positionsPromise = restSelect<SavedEstimatePosition>('smeta_pozicii', {
-          select: 'id,smeta_id,position_index,room_id,item_type,item_id,item_name,qty,unit,price,total,category,subcategory,base_price,item_snapshot,components_snapshot,source_snapshot',
-          filters: { smeta_id: selectedEstimate.id },
-          order: 'position_index.asc',
-        }).catch((loadError) => {
+        const positionsPromise = withTimeout(
+          restSelect<SavedEstimatePosition>('smeta_pozicii', {
+            select: 'id,smeta_id,position_index,room_id,item_type,item_id,item_name,qty,unit,price,total,category,subcategory,base_price,item_snapshot,components_snapshot,source_snapshot',
+            filters: { smeta_id: selectedEstimate.id },
+            order: 'position_index.asc',
+          }),
+          'Позиции сметы',
+          ESTIMATE_DETAILS_TIMEOUT_MS,
+        ).catch((loadError) => {
           if (!isSchemaCacheError(loadError)) throw loadError;
 
-          return restSelect<SavedEstimatePosition>('smeta_pozicii', {
-            select: 'id,smeta_id,item_type,item_id,item_name,qty,unit,price,total,created_at',
-            filters: { smeta_id: selectedEstimate.id },
-            order: 'created_at.asc',
-          });
+          return withTimeout(
+            restSelect<SavedEstimatePosition>('smeta_pozicii', {
+              select: 'id,smeta_id,item_type,item_id,item_name,qty,unit,price,total,created_at',
+              filters: { smeta_id: selectedEstimate.id },
+              order: 'created_at.asc',
+            }),
+            'Позиции сметы',
+            ESTIMATE_DETAILS_TIMEOUT_MS,
+          );
         });
 
         const [roomRows, positionRows] = await Promise.all([roomsPromise, positionsPromise]);

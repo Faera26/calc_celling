@@ -29,6 +29,10 @@ interface UseCatalogOptions {
   userEmail: string;
 }
 
+const CATALOG_COUNTS_TIMEOUT_MS = 5000;
+const CATALOG_DATA_TIMEOUT_MS = 8000;
+const NODE_COMPONENTS_TIMEOUT_MS = 8000;
+
 export function useCatalog({ authReady, userId, userEmail }: UseCatalogOptions) {
   const storedUser = readStoredAuthUser();
   const resolvedUserId = userId || storedUser?.id || '';
@@ -55,7 +59,7 @@ export function useCatalog({ authReady, userId, userEmail }: UseCatalogOptions) 
   const totalPages = Math.max(1, Math.ceil(itemsTotal / PAGE_SIZE));
   const nextPageDisabled = !hasNextPage && page >= totalPages;
 
-  const refresh = useCallback(() => setCatalogRefresh(prev => prev + 1), []);
+  const refresh = useCallback(() => setCatalogRefresh((prev) => prev + 1), []);
 
   const resetFilters = useCallback(() => {
     setSearch('');
@@ -64,7 +68,6 @@ export function useCatalog({ authReady, userId, userEmail }: UseCatalogOptions) 
     setPage(1);
   }, []);
 
-  // Debounce search
   useEffect(() => {
     const timer = window.setTimeout(() => {
       setDebouncedSearch(cleanSearch(search));
@@ -72,29 +75,24 @@ export function useCatalog({ authReady, userId, userEmail }: UseCatalogOptions) 
     return () => window.clearTimeout(timer);
   }, [search]);
 
-  // Reset on type change
   useEffect(() => {
     setPage(1);
     setActiveCategory(ALL_OPTION);
     setActiveSubcategory(ALL_OPTION);
   }, [activeType]);
 
-  // Reset page on filter change
   useEffect(() => {
     setPage(1);
   }, [debouncedSearch, activeCategory, activeSubcategory]);
 
-  // Clamp page
   useEffect(() => {
     if (page > totalPages) setPage(totalPages);
   }, [page, totalPages]);
 
-  // Sync itemsTotal from counts when no filter active
   useEffect(() => {
     if (!filterIsActive) setItemsTotal(activeCount);
   }, [filterIsActive, activeCount]);
 
-  // Clear state when not authenticated
   useEffect(() => {
     if (!authReady || !resolvedUserEmail) {
       setItems([]);
@@ -110,13 +108,12 @@ export function useCatalog({ authReady, userId, userEmail }: UseCatalogOptions) 
     let cancelled = false;
 
     async function loadCounts() {
-      // Counters are secondary data. If one request is slow or unavailable,
-      // the catalog itself should still open immediately.
+      // Счётчики не должны держать страницу в ожидании десятки секунд.
       const [tovary, uslugi, uzly, komplektaciya] = await Promise.allSettled([
-        withTimeout(restCount('tovary'), 'Счётчик товаров', 15000),
-        withTimeout(restCount('uslugi'), 'Счётчик услуг', 15000),
-        withTimeout(restCount('uzly'), 'Счётчик узлов', 15000),
-        withTimeout(restCount('komplektaciya_uzlov'), 'Счётчик комплектации узлов', 15000),
+        withTimeout(restCount('tovary'), 'Счётчик товаров', CATALOG_COUNTS_TIMEOUT_MS),
+        withTimeout(restCount('uslugi'), 'Счётчик услуг', CATALOG_COUNTS_TIMEOUT_MS),
+        withTimeout(restCount('uzly'), 'Счётчик узлов', CATALOG_COUNTS_TIMEOUT_MS),
+        withTimeout(restCount('komplektaciya_uzlov'), 'Счётчик комплектации узлов', CATALOG_COUNTS_TIMEOUT_MS),
       ]);
 
       if (cancelled) return;
@@ -125,18 +122,19 @@ export function useCatalog({ authReady, userId, userEmail }: UseCatalogOptions) 
         tovar: tovary.status === 'fulfilled' ? tovary.value : 0,
         usluga: uslugi.status === 'fulfilled' ? uslugi.value : 0,
         uzel: uzly.status === 'fulfilled' ? uzly.value : 0,
-        komplektaciya: komplektaciya.status === 'fulfilled' ? komplektaciya.value : 0
+        komplektaciya: komplektaciya.status === 'fulfilled' ? komplektaciya.value : 0,
       });
     }
 
-    loadCounts().catch(error => {
+    loadCounts().catch((error) => {
       console.warn('Не удалось обновить счётчики каталога:', error);
     });
 
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [authReady, resolvedUserEmail, resolvedUserId, catalogRefresh]);
 
-  // Load categories
   useEffect(() => {
     if (!authReady || !resolvedUserEmail || !resolvedUserId) return;
 
@@ -151,25 +149,29 @@ export function useCatalog({ authReady, userId, userEmail }: UseCatalogOptions) 
             filters: { entity_type: activeType },
             order: 'category.asc,subcategory.asc',
           }),
-          'Категории'
+          'Категории',
+          CATALOG_DATA_TIMEOUT_MS,
         );
 
         if (cancelled) return;
-        setCategoriesLoading(false);
         setCategories(buildCategoryGroups(data || []));
       } catch (error) {
         if (cancelled) return;
-        setCategoriesLoading(false);
         setCategories([]);
         setLoadError(formatError(error));
+      } finally {
+        if (!cancelled) {
+          setCategoriesLoading(false);
+        }
       }
     }
 
-    loadCategories();
-    return () => { cancelled = true; };
+    void loadCategories();
+    return () => {
+      cancelled = true;
+    };
   }, [authReady, resolvedUserEmail, resolvedUserId, activeType, catalogRefresh]);
 
-  // Load page items
   useEffect(() => {
     if (!authReady || !resolvedUserEmail || !resolvedUserId) return;
 
@@ -195,34 +197,51 @@ export function useCatalog({ authReady, userId, userEmail }: UseCatalogOptions) 
             offset: from,
             search: debouncedSearch,
           }),
-          `${titleOf(activeType)}: страница ${page}`
+          `${titleOf(activeType)}: страница ${page}`,
+          CATALOG_DATA_TIMEOUT_MS,
         );
 
         if (cancelled) return;
-        setItemsLoading(false);
 
-        const rows = ((data || []) as CatalogItem[]).map(item => normalizeItem(item));
+        const rows = ((data || []) as CatalogItem[]).map((item) => normalizeItem(item));
         const visibleRows = rows.slice(0, PAGE_SIZE);
         const nextExists = rows.length > PAGE_SIZE;
         const fallbackTotal = from + visibleRows.length + (nextExists ? 1 : 0);
-      const unfilteredTotal = activeCount || fallbackTotal;
+        const unfilteredTotal = activeCount || fallbackTotal;
 
         setItems(visibleRows);
         setHasNextPage(nextExists);
         setItemsTotal(filterIsActive ? fallbackTotal : unfilteredTotal);
       } catch (error) {
         if (cancelled) return;
-        setItemsLoading(false);
         setItems([]);
         setItemsTotal(0);
         setHasNextPage(false);
         setLoadError(formatError(error));
+      } finally {
+        if (!cancelled) {
+          setItemsLoading(false);
+        }
       }
     }
 
-    loadPage();
-    return () => { cancelled = true; };
-  }, [authReady, resolvedUserEmail, resolvedUserId, activeType, activeCategory, activeSubcategory, debouncedSearch, page, catalogRefresh, activeCount, filterIsActive]);
+    void loadPage();
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    authReady,
+    resolvedUserEmail,
+    resolvedUserId,
+    activeType,
+    activeCategory,
+    activeSubcategory,
+    debouncedSearch,
+    page,
+    catalogRefresh,
+    activeCount,
+    filterIsActive,
+  ]);
 
   async function loadNodeComponents(nodeId: string, force = false) {
     if (!force && nodeComponents[nodeId]) return nodeComponents[nodeId];
@@ -233,20 +252,21 @@ export function useCatalog({ authReady, userId, userEmail }: UseCatalogOptions) 
         filters: { uzel_id: nodeId },
         order: 'position_index.asc',
       }),
-      'Комплектация узла'
+      'Комплектация узла',
+      NODE_COMPONENTS_TIMEOUT_MS,
     );
 
-    const rows = ((data || []) as UzelComponent[]).map(row => normalizeComponent(row));
-    setNodeComponents(prev => ({ ...prev, [nodeId]: rows }));
+    const rows = ((data || []) as UzelComponent[]).map((row) => normalizeComponent(row));
+    setNodeComponents((prev) => ({ ...prev, [nodeId]: rows }));
     return rows;
   }
 
   function updateItemInList(updatedItem: CatalogItem) {
-    setItems(prev => prev.map(item => item.id === updatedItem.id ? updatedItem : item));
+    setItems((prev) => prev.map((item) => (item.id === updatedItem.id ? updatedItem : item)));
   }
 
   function updateNodeComponents(nodeId: string, rows: UzelComponent[]) {
-    setNodeComponents(prev => ({ ...prev, [nodeId]: rows }));
+    setNodeComponents((prev) => ({ ...prev, [nodeId]: rows }));
   }
 
   return {
@@ -281,8 +301,6 @@ export function useCatalog({ authReady, userId, userEmail }: UseCatalogOptions) 
     resetFilters,
   };
 }
-
-// Exported for use in NodeDetailsDialog
 
 export async function openNodeDetails(
   node: UzelItem,
