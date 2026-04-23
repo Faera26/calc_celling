@@ -1,7 +1,11 @@
-import { createClient } from '@supabase/supabase-js';
+'use client';
+
+import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 
 const DEFAULT_SUPABASE_URL = 'https://rreqijywlhsodppwebjy.supabase.co';
 const DEFAULT_SUPABASE_ANON_KEY = 'sb_publishable_aVVYUkx_p3xW3a--cm57oA_s-n5IsFU';
+
+let browserSupabaseClient: SupabaseClient | null = null;
 
 function resolvePublicEnv(value: string | undefined, fallback: string, envName: string) {
   const resolved = value || fallback;
@@ -28,4 +32,29 @@ export const supabaseAnonKey = resolvePublicEnv(
   'NEXT_PUBLIC_SUPABASE_ANON_KEY'
 );
 
-export const supabase = createClient(supabaseUrl, supabaseAnonKey);
+function createBrowserSupabaseClient() {
+  return createClient(supabaseUrl, supabaseAnonKey, {
+    auth: {
+      persistSession: true,
+      autoRefreshToken: true,
+      detectSessionInUrl: true,
+    },
+  });
+}
+
+export function getSupabaseClient() {
+  if (!browserSupabaseClient) {
+    browserSupabaseClient = createBrowserSupabaseClient();
+  }
+
+  return browserSupabaseClient;
+}
+
+export const supabase = new Proxy({} as SupabaseClient, {
+  get(_target, property, receiver) {
+    const client = getSupabaseClient();
+    const value = Reflect.get(client as object, property, receiver);
+
+    return typeof value === 'function' ? value.bind(client) : value;
+  },
+});

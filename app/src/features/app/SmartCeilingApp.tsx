@@ -1,12 +1,19 @@
 'use client';
 
 import { useState } from 'react';
-import dynamic from 'next/dynamic';
 import { Box, CircularProgress } from '@mui/material';
 import AppLayout from '../../components/AppLayout';
+import CartDrawer from '../../components/CartDrawer';
+import SettingsDrawer from '../../components/SettingsDrawer';
 import { useAuth } from '../../hooks/useAuth';
 import { useCart } from '../../hooks/useCart';
 import { useSettings } from '../../hooks/useSettings';
+import AdminPage from '../../screens/AdminPage';
+import CatalogPage from '../../screens/CatalogPage';
+import EstimatesPage from '../../screens/EstimatesPage';
+import LoginPage from '../../screens/LoginPage';
+import PendingAccessPage from '../../screens/PendingAccessPage';
+import ProfilePage from '../../screens/ProfilePage';
 
 type SmartCeilingPage = 'catalog' | 'estimates' | 'profile' | 'admin';
 
@@ -29,15 +36,6 @@ function FullScreenLoader() {
     </Box>
   );
 }
-
-const CartDrawer = dynamic(() => import('../../components/CartDrawer'));
-const SettingsDrawer = dynamic(() => import('../../components/SettingsDrawer'));
-const AdminPage = dynamic(() => import('../../screens/AdminPage'), { loading: () => <FullScreenLoader /> });
-const CatalogPage = dynamic(() => import('../../screens/CatalogPage'), { loading: () => <FullScreenLoader /> });
-const EstimatesPage = dynamic(() => import('../../screens/EstimatesPage'), { loading: () => <FullScreenLoader /> });
-const LoginPage = dynamic(() => import('../../screens/LoginPage'), { loading: () => <FullScreenLoader /> });
-const PendingAccessPage = dynamic(() => import('../../screens/PendingAccessPage'), { loading: () => <FullScreenLoader /> });
-const ProfilePage = dynamic(() => import('../../screens/ProfilePage'), { loading: () => <FullScreenLoader /> });
 
 export default function SmartCeilingApp({ page }: SmartCeilingAppProps) {
   const auth = useAuth();

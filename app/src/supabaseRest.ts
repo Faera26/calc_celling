@@ -25,10 +25,52 @@ interface RestMutationOptions {
 // Приложение теперь собирается как статический Next.js export.
 // У такого режима нет локального Vite proxy, поэтому REST идёт напрямую в Supabase.
 const restBaseUrl = `${supabaseUrl}/rest/v1`;
+const projectRef = (() => {
+  try {
+    return new URL(supabaseUrl).hostname.split('.')[0] || '';
+  } catch {
+    return '';
+  }
+})();
+const authStorageKey = projectRef ? `sb-${projectRef}-auth-token` : '';
+
+function readAccessTokenFromStorage() {
+  if (typeof window === 'undefined' || !authStorageKey) return null;
+
+  try {
+    const rawValue = window.localStorage.getItem(authStorageKey);
+    if (!rawValue) return null;
+
+    const parsed = JSON.parse(rawValue) as { access_token?: unknown };
+    return typeof parsed.access_token === 'string' && parsed.access_token
+      ? parsed.access_token
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+async function resolveAccessToken() {
+  // После холодной загрузки Supabase иногда восстанавливает сессию чуть позже,
+  // чем страница успевает запросить данные через REST. Берём токен напрямую
+  // из localStorage, чтобы экран смет не зависал в вечной загрузке.
+  const storedToken = readAccessTokenFromStorage();
+  if (storedToken) return storedToken;
+
+  try {
+    const session = await Promise.race([
+      supabase.auth.getSession().then(({ data }) => data.session),
+      new Promise<null>((resolve) => setTimeout(() => resolve(null), 1500)),
+    ]);
+
+    return session?.access_token || supabaseAnonKey;
+  } catch {
+    return supabaseAnonKey;
+  }
+}
 
 async function buildRestHeaders(extra?: HeadersInit): Promise<HeadersInit> {
-  const { data } = await supabase.auth.getSession();
-  const token = data.session?.access_token || supabaseAnonKey;
+  const token = await resolveAccessToken();
 
   return {
     apikey: supabaseAnonKey,
@@ -76,6 +118,7 @@ function buildMutationUrl(table: string, options: RestMutationOptions = {}) {
 }
 
 const CACHE_TTL = 30000;
+const REQUEST_TIMEOUT_MS = 15000;
 const restCache = new Map<string, { data: unknown; timestamp: number }>();
 
 function getCached<T>(key: string): T | null {
@@ -101,12 +144,32 @@ function readCountFromResponse(response: Response): number | null {
   return Number.isFinite(total) ? total : null;
 }
 
+async function fetchWithTimeout(input: string, init: RequestInit): Promise<Response> {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+
+  try {
+    return await fetch(input, {
+      ...init,
+      signal: controller.signal,
+    });
+  } catch (error) {
+    if (error instanceof DOMException && error.name === 'AbortError') {
+      throw new Error(`Request timeout after ${REQUEST_TIMEOUT_MS}ms`);
+    }
+
+    throw error;
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
 export async function restSelect<T>(table: string, options: RestSelectOptions): Promise<T[]> {
   const url = buildRestUrl(table, options);
   const cached = getCached<T[]>(url);
   if (cached) return cached;
 
-  const response = await fetch(url, {
+  const response = await fetchWithTimeout(url, {
     headers: await buildRestHeaders(),
     cache: 'no-store',
   });
@@ -127,7 +190,7 @@ export async function restInsert<T>(table: string, rows: unknown | unknown[], op
   if (options.select) params.set('select', options.select);
 
   const url = `${restBaseUrl}/${table}${params.toString() ? `?${params.toString()}` : ''}`;
-  const response = await fetch(url, {
+  const response = await fetchWithTimeout(url, {
     method: 'POST',
     cache: 'no-store',
     headers: await buildRestHeaders({
@@ -149,7 +212,7 @@ export async function restInsert<T>(table: string, rows: unknown | unknown[], op
 
 export async function restUpdate<T>(table: string, patch: unknown, options: RestMutationOptions = {}): Promise<T[]> {
   restCache.clear();
-  const response = await fetch(buildMutationUrl(table, options), {
+  const response = await fetchWithTimeout(buildMutationUrl(table, options), {
     method: 'PATCH',
     cache: 'no-store',
     headers: await buildRestHeaders({
@@ -171,7 +234,7 @@ export async function restUpdate<T>(table: string, patch: unknown, options: Rest
 
 export async function restDelete<T>(table: string, options: RestMutationOptions = {}): Promise<T[]> {
   restCache.clear();
-  const response = await fetch(buildMutationUrl(table, options), {
+  const response = await fetchWithTimeout(buildMutationUrl(table, options), {
     method: 'DELETE',
     cache: 'no-store',
     headers: await buildRestHeaders({
@@ -204,7 +267,7 @@ export async function restCount(table: string, filters?: RestFilters): Promise<n
   try {
     // HEAD is faster, but some environments reject it because of CORS or proxy rules.
     // We try it first and then transparently fall back to GET.
-    const headResponse = await fetch(url, {
+    const headResponse = await fetchWithTimeout(url, {
       method: 'HEAD',
       cache: 'no-store',
       headers,
@@ -221,7 +284,7 @@ export async function restCount(table: string, filters?: RestFilters): Promise<n
     // Ignore and continue with GET fallback below.
   }
 
-  const getResponse = await fetch(url, {
+  const getResponse = await fetchWithTimeout(url, {
     method: 'GET',
     cache: 'no-store',
     headers: {

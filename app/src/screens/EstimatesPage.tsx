@@ -322,7 +322,12 @@ export default function EstimatesPage({ auth, settings }: EstimatesPageProps) {
   }, [selectedId]);
 
   useEffect(() => {
-    if (auth.userId) loadEstimates();
+    if (!auth.userId) {
+      setLoading(false);
+      return;
+    }
+
+    void loadEstimates();
   }, [auth.userId, loadEstimates]);
 
   useEffect(() => {
