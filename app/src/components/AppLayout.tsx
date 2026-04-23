@@ -57,6 +57,10 @@ export default function AppLayout({
   // Один массив маршрутов используется и в верхнем меню, и в боковом drawer.
   // Так новичку проще менять навигацию: достаточно поправить один файл.
   function isActiveLink(href: string) {
+    if (href === '/catalog' && currentPath === '/') {
+      return true;
+    }
+
     if (href === '/') {
       return currentPath === '/';
     }

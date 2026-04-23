@@ -12,8 +12,6 @@ import type {
 } from '../types';
 import { ALL_OPTION, EMPTY_COUNTS, PAGE_SIZE } from '../constants';
 import {
-  buildCategoryGroups,
-  catalogColumnsOf,
   cleanSearch,
   formatError,
   normalizeComponent,
@@ -27,26 +25,72 @@ interface UseCatalogOptions {
   authReady: boolean;
   userId: string;
   userEmail: string;
+  initialType: CatalogType;
 }
+
+type SubcategorySummary = CategoryGroup['subcategories'][number];
 
 const CATALOG_COUNTS_TIMEOUT_MS = 5000;
 const CATALOG_DATA_TIMEOUT_MS = 8000;
 const NODE_COMPONENTS_TIMEOUT_MS = 8000;
 const CATALOG_COUNTS_DELAY_MS = 1500;
 
-export function useCatalog({ authReady, userId, userEmail }: UseCatalogOptions) {
+function normalizeCategory(value: string | null | undefined) {
+  return value || 'Без категории';
+}
+
+function normalizeSubcategory(value: string | null | undefined) {
+  return value || 'Без подкатегории';
+}
+
+function buildCategorySummary(rows: CategoryRow[]) {
+  const totals = new Map<string, number>();
+
+  rows.forEach((row) => {
+    const category = normalizeCategory(row.category);
+    const count = Number(row.items_count || 0);
+    totals.set(category, (totals.get(category) || 0) + count);
+  });
+
+  return [...totals.entries()]
+    .sort(([left], [right]) => left.localeCompare(right, 'ru'))
+    .map(([category, total]) => ({
+      category,
+      total,
+      subcategories: [],
+    }));
+}
+
+function buildSubcategorySummary(rows: CategoryRow[]) {
+  const totals = new Map<string, number>();
+
+  rows.forEach((row) => {
+    const subcategory = normalizeSubcategory(row.subcategory);
+    const count = Number(row.items_count || 0);
+    totals.set(subcategory, (totals.get(subcategory) || 0) + count);
+  });
+
+  return [...totals.entries()]
+    .sort(([left], [right]) => left.localeCompare(right, 'ru'))
+    .map(([name, count]) => ({ name, count }));
+}
+
+export function useCatalog({ authReady, userId, userEmail, initialType }: UseCatalogOptions) {
   const storedUser = readStoredAuthUser();
   const resolvedUserId = userId || storedUser?.id || '';
   const resolvedUserEmail = userEmail || storedUser?.email || '';
+  const [activeType, setActiveType] = useState<CatalogType>(initialType);
   const [items, setItems] = useState<CatalogItem[]>([]);
   const [itemsTotal, setItemsTotal] = useState(0);
   const [hasNextPage, setHasNextPage] = useState(false);
   const [itemsLoading, setItemsLoading] = useState(false);
   const [categories, setCategories] = useState<CategoryGroup[]>([]);
+  const [categoriesLoaded, setCategoriesLoaded] = useState(false);
   const [categoriesLoading, setCategoriesLoading] = useState(false);
+  const [subcategoriesLoading, setSubcategoriesLoading] = useState(false);
+  const [subcategoriesByCategory, setSubcategoriesByCategory] = useState<Record<string, SubcategorySummary[]>>({});
   const [counts, setCounts] = useState<CatalogCounts>(EMPTY_COUNTS);
   const [loadError, setLoadError] = useState('');
-  const [activeType, setActiveType] = useState<CatalogType>('uzel');
   const [activeCategory, setActiveCategory] = useState(ALL_OPTION);
   const [activeSubcategory, setActiveSubcategory] = useState(ALL_OPTION);
   const [search, setSearch] = useState('');
@@ -55,10 +99,13 @@ export function useCatalog({ authReady, userId, userEmail }: UseCatalogOptions) 
   const [nodeComponents, setNodeComponents] = useState<Record<string, UzelComponent[]>>({});
   const [catalogRefresh, setCatalogRefresh] = useState(0);
 
+  const selectionReady = activeCategory !== ALL_OPTION && activeSubcategory !== ALL_OPTION;
   const filterIsActive = activeCategory !== ALL_OPTION || activeSubcategory !== ALL_OPTION || Boolean(debouncedSearch);
-  const activeCount = counts[activeType] || 0;
   const totalPages = Math.max(1, Math.ceil(itemsTotal / PAGE_SIZE));
   const nextPageDisabled = !hasNextPage && page >= totalPages;
+  const activeSubcategories = activeCategory === ALL_OPTION
+    ? []
+    : subcategoriesByCategory[activeCategory] || [];
 
   const refresh = useCallback(() => setCatalogRefresh((prev) => prev + 1), []);
 
@@ -67,7 +114,14 @@ export function useCatalog({ authReady, userId, userEmail }: UseCatalogOptions) 
     setActiveCategory(ALL_OPTION);
     setActiveSubcategory(ALL_OPTION);
     setPage(1);
+    setItems([]);
+    setItemsTotal(0);
+    setHasNextPage(false);
   }, []);
+
+  useEffect(() => {
+    setActiveType(initialType);
+  }, [initialType]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -77,22 +131,28 @@ export function useCatalog({ authReady, userId, userEmail }: UseCatalogOptions) 
   }, [search]);
 
   useEffect(() => {
-    setPage(1);
+    // При переходе между страницами каталогов начинаем выбор заново,
+    // чтобы не тянуть подкатегории и позиции от другого раздела.
+    setCategories([]);
+    setCategoriesLoaded(false);
+    setSubcategoriesByCategory({});
     setActiveCategory(ALL_OPTION);
     setActiveSubcategory(ALL_OPTION);
+    setItems([]);
+    setItemsTotal(0);
+    setHasNextPage(false);
+    setPage(1);
   }, [activeType]);
 
   useEffect(() => {
     setPage(1);
-  }, [debouncedSearch, activeCategory, activeSubcategory]);
+  }, [debouncedSearch, activeSubcategory]);
 
   useEffect(() => {
-    if (page > totalPages) setPage(totalPages);
+    if (page > totalPages) {
+      setPage(totalPages);
+    }
   }, [page, totalPages]);
-
-  useEffect(() => {
-    if (!filterIsActive) setItemsTotal(activeCount);
-  }, [filterIsActive, activeCount]);
 
   useEffect(() => {
     if (!authReady || !resolvedUserEmail) {
@@ -100,6 +160,8 @@ export function useCatalog({ authReady, userId, userEmail }: UseCatalogOptions) 
       setItemsTotal(0);
       setHasNextPage(false);
       setCategories([]);
+      setCategoriesLoaded(false);
+      setSubcategoriesByCategory({});
       setCounts(EMPTY_COUNTS);
       setNodeComponents({});
       return;
@@ -112,8 +174,6 @@ export function useCatalog({ authReady, userId, userEmail }: UseCatalogOptions) 
     }, CATALOG_COUNTS_DELAY_MS);
 
     async function loadCounts() {
-      // Счётчики вторичны: грузим их после первого экрана и по одному,
-      // чтобы не создавать пачку параллельных запросов к Supabase.
       const countTargets: Array<[keyof CatalogCounts, string, string]> = [
         ['tovar', 'tovary', 'Счётчик товаров'],
         ['usluga', 'uslugi', 'Счётчик услуг'],
@@ -145,100 +205,171 @@ export function useCatalog({ authReady, userId, userEmail }: UseCatalogOptions) 
     };
   }, [authReady, resolvedUserEmail, resolvedUserId, catalogRefresh]);
 
+  const ensureCategoriesLoaded = useCallback(async (force = false) => {
+    if (!authReady || !resolvedUserEmail || !resolvedUserId) return [];
+    if (categoriesLoaded && !force) return categories;
+
+    setCategoriesLoading(true);
+    setLoadError('');
+
+    try {
+      const rows = await withTimeout(
+        restSelect<CategoryRow>('kategorii', {
+          select: 'category,items_count',
+          filters: { entity_type: activeType },
+          order: 'category.asc',
+        }),
+        `${titleOf(activeType)}: категории`,
+        CATALOG_DATA_TIMEOUT_MS,
+      );
+
+      const nextCategories = buildCategorySummary(rows || []);
+      setCategories(nextCategories);
+      setCategoriesLoaded(true);
+      return nextCategories;
+    } catch (error) {
+      setCategories([]);
+      setCategoriesLoaded(false);
+      setLoadError(formatError(error));
+      return [];
+    } finally {
+      setCategoriesLoading(false);
+    }
+  }, [activeType, authReady, categories, categoriesLoaded, resolvedUserEmail, resolvedUserId]);
+
+  const ensureSubcategoriesLoaded = useCallback(async (category: string, force = false) => {
+    if (!category || category === ALL_OPTION) return [];
+    if (!authReady || !resolvedUserEmail || !resolvedUserId) return [];
+
+    const cachedRows = subcategoriesByCategory[category];
+    if (cachedRows && !force) return cachedRows;
+
+    setSubcategoriesLoading(true);
+    setLoadError('');
+
+    try {
+      const rows = await withTimeout(
+        restSelect<CategoryRow>('kategorii', {
+          select: 'subcategory,items_count',
+          filters: { entity_type: activeType, category },
+          order: 'subcategory.asc',
+        }),
+        `${titleOf(activeType)}: подкатегории`,
+        CATALOG_DATA_TIMEOUT_MS,
+      );
+
+      const nextSubcategories = buildSubcategorySummary(rows || []);
+      setSubcategoriesByCategory((prev) => ({ ...prev, [category]: nextSubcategories }));
+      return nextSubcategories;
+    } catch (error) {
+      setLoadError(formatError(error));
+      return [];
+    } finally {
+      setSubcategoriesLoading(false);
+    }
+  }, [activeType, authReady, resolvedUserEmail, resolvedUserId, subcategoriesByCategory]);
+
+  const selectCategory = useCallback(async (category: string) => {
+    setActiveCategory(category);
+    setActiveSubcategory(ALL_OPTION);
+    setPage(1);
+    setItems([]);
+    setItemsTotal(0);
+    setHasNextPage(false);
+
+    if (category !== ALL_OPTION) {
+      await ensureSubcategoriesLoaded(category);
+    }
+  }, [ensureSubcategoriesLoaded]);
+
+  const selectSubcategory = useCallback((subcategory: string) => {
+    setActiveSubcategory(subcategory);
+    setPage(1);
+  }, []);
+
   useEffect(() => {
     if (!authReady || !resolvedUserEmail || !resolvedUserId) return;
+
+    if (!selectionReady) {
+      setItems([]);
+      setItemsTotal(0);
+      setHasNextPage(false);
+      return;
+    }
 
     let cancelled = false;
 
     async function loadCatalogPage() {
       setItemsLoading(true);
-      setCategoriesLoading(true);
       setLoadError('');
 
       try {
         const from = (page - 1) * PAGE_SIZE;
         const table = tableOf(activeType);
-        const filters: Record<string, string> = {};
+        const filters = {
+          category: activeCategory,
+          subcategory: activeSubcategory,
+        };
 
-        if (activeCategory !== ALL_OPTION) filters.category = activeCategory;
-        if (activeSubcategory !== ALL_OPTION) filters.subcategory = activeSubcategory;
-
-        // Сначала показываем сам список позиций. Категории добираем после него,
-        // чтобы пользователь быстрее увидел каталог, даже если боковые данные тормозят.
-        const pageData = await withTimeout(
-          restSelect<CatalogItem>(table, {
-            select: catalogColumnsOf(activeType),
-            filters,
-            order: 'name.asc',
-            limit: PAGE_SIZE + 1,
-            offset: from,
-            search: debouncedSearch,
-          }),
-          `${titleOf(activeType)}: страница ${page}`,
-          CATALOG_DATA_TIMEOUT_MS,
-        );
+        // После выбора категории и подкатегории тянем только одну страницу позиций
+        // и отдельный count для нормальной пагинации.
+        const [pageData, totalCount] = await Promise.all([
+          withTimeout(
+            restSelect<CatalogItem>(table, {
+              select: activeType === 'uzel'
+                ? 'id,name,category,subcategory,price,unit,image,description,stats'
+                : 'id,name,category,subcategory,price,unit,image,description,source',
+              filters,
+              order: 'name.asc',
+              limit: PAGE_SIZE + 1,
+              offset: from,
+              search: debouncedSearch,
+            }),
+            `${titleOf(activeType)}: страница ${page}`,
+            CATALOG_DATA_TIMEOUT_MS,
+          ),
+          withTimeout(
+            restCount(table, filters, debouncedSearch),
+            `${titleOf(activeType)}: количество позиций`,
+            CATALOG_DATA_TIMEOUT_MS,
+          ),
+        ]);
 
         if (cancelled) return;
 
         const rows = ((pageData || []) as CatalogItem[]).map((item) => normalizeItem(item));
-        const visibleRows = rows.slice(0, PAGE_SIZE);
-        const nextExists = rows.length > PAGE_SIZE;
-        const fallbackTotal = from + visibleRows.length + (nextExists ? 1 : 0);
-        const unfilteredTotal = activeCount || fallbackTotal;
-
-        setItems(visibleRows);
-        setHasNextPage(nextExists);
-        setItemsTotal(filterIsActive ? fallbackTotal : unfilteredTotal);
-
-        try {
-          const categoryData = await withTimeout(
-            restSelect<CategoryRow>('kategorii', {
-              select: 'category,subcategory,items_count',
-              filters: { entity_type: activeType },
-              order: 'category.asc,subcategory.asc',
-            }),
-            'Категории',
-            CATALOG_DATA_TIMEOUT_MS,
-          );
-
-          if (cancelled) return;
-          setCategories(buildCategoryGroups(categoryData || []));
-        } catch (error) {
-          if (cancelled) return;
-          setCategories([]);
-          console.warn('Не удалось загрузить категории каталога:', error);
-        }
+        setItems(rows.slice(0, PAGE_SIZE));
+        setHasNextPage(rows.length > PAGE_SIZE);
+        setItemsTotal(totalCount);
       } catch (error) {
         if (cancelled) return;
         setItems([]);
         setItemsTotal(0);
         setHasNextPage(false);
-        setCategories([]);
         setLoadError(formatError(error));
       } finally {
         if (!cancelled) {
           setItemsLoading(false);
-          setCategoriesLoading(false);
         }
       }
     }
 
     void loadCatalogPage();
+
     return () => {
       cancelled = true;
     };
   }, [
-    authReady,
-    resolvedUserEmail,
-    resolvedUserId,
-    activeType,
     activeCategory,
     activeSubcategory,
+    activeType,
+    authReady,
     debouncedSearch,
     page,
+    resolvedUserEmail,
+    resolvedUserId,
+    selectionReady,
     catalogRefresh,
-    activeCount,
-    filterIsActive,
   ]);
 
   async function loadNodeComponents(nodeId: string, force = false) {
@@ -273,25 +404,30 @@ export function useCatalog({ authReady, userId, userEmail }: UseCatalogOptions) 
     hasNextPage,
     itemsLoading,
     categories,
+    categoriesLoaded,
     categoriesLoading,
+    subcategories: activeSubcategories,
+    subcategoriesLoading,
     counts,
     loadError,
     setLoadError,
     activeType,
-    setActiveType,
     activeCategory,
-    setActiveCategory,
     activeSubcategory,
-    setActiveSubcategory,
     search,
     setSearch,
     debouncedSearch,
     page,
     setPage,
     filterIsActive,
+    selectionReady,
     totalPages,
     nextPageDisabled,
     nodeComponents,
+    ensureCategoriesLoaded,
+    ensureSubcategoriesLoaded,
+    selectCategory,
+    selectSubcategory,
     loadNodeComponents,
     updateItemInList,
     updateNodeComponents,

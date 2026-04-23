@@ -14,11 +14,13 @@ import EstimatesPage from '../../screens/EstimatesPage';
 import LoginPage from '../../screens/LoginPage';
 import PendingAccessPage from '../../screens/PendingAccessPage';
 import ProfilePage from '../../screens/ProfilePage';
+import type { CatalogType } from '../../types';
 
 type SmartCeilingPage = 'catalog' | 'estimates' | 'profile' | 'admin';
 
 interface SmartCeilingAppProps {
   page: SmartCeilingPage;
+  catalogType?: CatalogType;
 }
 
 function FullScreenLoader() {
@@ -37,7 +39,7 @@ function FullScreenLoader() {
   );
 }
 
-export default function SmartCeilingApp({ page }: SmartCeilingAppProps) {
+export default function SmartCeilingApp({ page, catalogType = 'tovar' }: SmartCeilingAppProps) {
   const auth = useAuth();
   const settings = useSettings({
     userId: auth.userId,
@@ -94,6 +96,7 @@ export default function SmartCeilingApp({ page }: SmartCeilingAppProps) {
         auth={auth}
         settings={settings.settings}
         cart={cart.cart}
+        initialType={catalogType}
         onAddToCart={cart.addToCart}
         onRemoveFromCart={cart.removeFromCart}
         search={search}

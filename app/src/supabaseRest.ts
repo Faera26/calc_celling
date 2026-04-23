@@ -87,8 +87,11 @@ function buildCacheKey(table: string, action: string, payload: unknown) {
   return `${table}:${action}:${JSON.stringify(payload)}`;
 }
 
-function countCacheKey(table: string, filters?: RestFilters) {
-  return buildCacheKey(table, 'count', filters || {});
+function countCacheKey(table: string, filters?: RestFilters, search?: string) {
+  return buildCacheKey(table, 'count', {
+    filters: filters || {},
+    search: search || '',
+  });
 }
 
 function addFilters(query: URLSearchParams, filters?: RestFilters) {
@@ -435,8 +438,8 @@ export async function restDelete<T>(table: string, options: RestMutationOptions 
   });
 }
 
-export async function restCount(table: string, filters?: RestFilters): Promise<number> {
-  const cacheKey = countCacheKey(table, filters);
+export async function restCount(table: string, filters?: RestFilters, search?: string): Promise<number> {
+  const cacheKey = countCacheKey(table, filters, search);
   const cached = getCached<number>(cacheKey);
   if (cached !== null) return cached;
 
@@ -447,12 +450,14 @@ export async function restCount(table: string, filters?: RestFilters): Promise<n
       action: 'count',
       table,
       filters,
+      search,
     });
     safeCount = Number(countValue || 0);
   } else {
     const query = new URLSearchParams();
     query.set('select', 'id');
     addFilters(query, filters);
+    addSearch(query, search);
 
     let response: Response;
 

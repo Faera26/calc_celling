@@ -1,5 +1,6 @@
 export const APP_ROUTES = {
-  catalog: '/',
+  home: '/',
+  catalog: '/catalog',
   estimates: '/estimates',
   profile: '/profile',
   admin: '/admin',

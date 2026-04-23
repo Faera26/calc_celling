@@ -105,6 +105,7 @@ module.exports = async function handler(req, res) {
   if (action === 'count') {
     query.set('select', 'id');
     addFilters(query, filters);
+    addSearch(query, search);
     prefer.push('count=exact');
   }
 
