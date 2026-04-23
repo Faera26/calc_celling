@@ -1,36 +1,47 @@
 import { Box, CircularProgress } from '@mui/material';
-import type { CatalogItem, CatalogType, CartEntry, UzelComponent, UzelItem } from '../types';
-import type { CompanySettings } from '../types';
+import type { CatalogItem, CatalogType, CartEntry, CompanySettings, UzelComponent } from '../types';
 import { keyOf } from '../utils';
 import CatalogCard from './CatalogCard';
 
-interface CatalogGridProps {
+interface CatalogGridBaseProps {
   items: CatalogItem[];
   activeType: CatalogType;
   isAdmin: boolean;
-  cart: Record<string, CartEntry>;
   nodeComponents: Record<string, UzelComponent[]>;
   settings: CompanySettings;
   loading: boolean;
-  onAddToCart: (type: CatalogType, item: CatalogItem) => void | Promise<void>;
-  onRemoveFromCart: (cartKey: string) => void;
-  onViewNode: (node: UzelItem) => void;
-  onOpenConstructor: (node: UzelItem) => void;
+  onViewNode: (item: CatalogItem) => void;
+  onOpenConstructor: (item: CatalogItem) => void;
 }
 
-export default function CatalogGrid({
-  items,
-  activeType,
-  isAdmin,
-  cart,
-  nodeComponents,
-  settings,
-  loading,
-  onAddToCart,
-  onRemoveFromCart,
-  onViewNode,
-  onOpenConstructor,
-}: CatalogGridProps) {
+interface CatalogGridBrowseProps extends CatalogGridBaseProps {
+  mode?: 'browse';
+  cart: Record<string, CartEntry>;
+  onAddToCart: (type: CatalogType, item: CatalogItem) => void | Promise<void>;
+  onRemoveFromCart: (cartKey: string) => void;
+}
+
+interface CatalogGridManageProps extends CatalogGridBaseProps {
+  mode: 'manage';
+  deletingItemId?: string;
+  onEditItem?: (item: CatalogItem) => void;
+  onDeleteItem?: (item: CatalogItem) => void;
+}
+
+type CatalogGridProps = CatalogGridBrowseProps | CatalogGridManageProps;
+
+export default function CatalogGrid(props: CatalogGridProps) {
+  const {
+    items,
+    activeType,
+    isAdmin,
+    nodeComponents,
+    settings,
+    loading,
+    onViewNode,
+    onOpenConstructor,
+  } = props;
+
   if (loading) {
     return (
       <Box sx={{ display: 'flex', justifyContent: 'center', py: 10 }}>
@@ -39,34 +50,70 @@ export default function CatalogGrid({
     );
   }
 
+  const gridStyles = {
+    display: 'grid',
+    gridTemplateColumns: {
+      xs: '1fr',
+      sm: 'repeat(2, minmax(0, 1fr))',
+      xl: 'repeat(3, minmax(0, 1fr))',
+    },
+    gap: 2,
+  } as const;
+
+  if (props.mode === 'manage') {
+    return (
+      <Box sx={gridStyles}>
+        {items.map((item) => {
+          const cardKey = keyOf(activeType, item.id);
+          const cachedComponents = nodeComponents[item.id];
+          const editItem = props.onEditItem;
+          const deleteItem = props.onDeleteItem;
+
+          return (
+            <CatalogCard
+              key={cardKey}
+              item={item}
+              activeType={activeType}
+              isAdmin={isAdmin}
+              cartQty={0}
+              cachedComponents={cachedComponents}
+              settings={settings}
+              mode="manage"
+              deleteInProgress={props.deletingItemId === item.id}
+              onAddToCart={() => {}}
+              onRemoveFromCart={() => {}}
+              onViewNode={() => onViewNode(item)}
+              onOpenConstructor={() => onOpenConstructor(item)}
+              onEdit={editItem ? () => editItem(item) : undefined}
+              onDelete={deleteItem ? () => deleteItem(item) : undefined}
+            />
+          );
+        })}
+      </Box>
+    );
+  }
+
   return (
-    <Box sx={{
-      display: 'grid',
-      gridTemplateColumns: {
-        xs: '1fr',
-        sm: 'repeat(2, minmax(0, 1fr))',
-        xl: 'repeat(3, minmax(0, 1fr))'
-      },
-      gap: 2
-    }}>
-      {items.map(item => {
-        const cartKey = keyOf(activeType, item.id);
-        const cartQty = cart[cartKey]?.qty || 0;
+    <Box sx={gridStyles}>
+      {items.map((item) => {
+        const cardKey = keyOf(activeType, item.id);
         const cachedComponents = nodeComponents[item.id];
+        const cartQty = props.cart[cardKey]?.qty || 0;
 
         return (
           <CatalogCard
-            key={cartKey}
+            key={cardKey}
             item={item}
             activeType={activeType}
             isAdmin={isAdmin}
             cartQty={cartQty}
             cachedComponents={cachedComponents}
             settings={settings}
-            onAddToCart={() => onAddToCart(activeType, item)}
-            onRemoveFromCart={() => onRemoveFromCart(cartKey)}
-            onViewNode={() => onViewNode(item as UzelItem)}
-            onOpenConstructor={() => onOpenConstructor(item as UzelItem)}
+            mode="browse"
+            onAddToCart={() => props.onAddToCart(activeType, item)}
+            onRemoveFromCart={() => props.onRemoveFromCart(cardKey)}
+            onViewNode={() => onViewNode(item)}
+            onOpenConstructor={() => onOpenConstructor(item)}
           />
         );
       })}

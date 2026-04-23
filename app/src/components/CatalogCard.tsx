@@ -15,6 +15,8 @@ import { PLACEHOLDER_IMAGE } from '../constants';
 import type { CatalogItem, CatalogType, CompanySettings, UzelComponent } from '../types';
 import { adjustedPrice, keyOf, labelOf, money, nodeCompositionCounts } from '../utils';
 
+type CatalogCardMode = 'browse' | 'manage';
+
 interface CatalogCardProps {
   item: CatalogItem;
   activeType: CatalogType;
@@ -22,10 +24,14 @@ interface CatalogCardProps {
   cartQty: number;
   cachedComponents?: UzelComponent[];
   settings: CompanySettings;
+  mode?: CatalogCardMode;
+  deleteInProgress?: boolean;
   onAddToCart: () => void;
   onRemoveFromCart: () => void;
   onViewNode: () => void;
   onOpenConstructor: () => void;
+  onEdit?: () => void;
+  onDelete?: () => void;
 }
 
 export default function CatalogCard({
@@ -35,14 +41,20 @@ export default function CatalogCard({
   cartQty,
   cachedComponents,
   settings,
+  mode = 'browse',
+  deleteInProgress = false,
   onAddToCart,
   onRemoveFromCart,
   onViewNode,
   onOpenConstructor,
+  onEdit,
+  onDelete,
 }: CatalogCardProps) {
   const composition = activeType === 'uzel' ? nodeCompositionCounts(item, cachedComponents) : undefined;
   const componentCount = composition?.positions;
   const cartKey = keyOf(activeType, item.id);
+  const manageMode = mode === 'manage';
+  const hasManagementActions = Boolean(onEdit || onDelete);
 
   return (
     <Card key={cartKey} sx={{ display: 'flex', flexDirection: 'column', height: '100%', borderRadius: '24px' }}>
@@ -54,6 +66,7 @@ export default function CatalogCard({
           sx={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain', mixBlendMode: 'multiply', transition: 'transform 0.5s ease', '&:hover': { transform: 'scale(1.05)' } }}
         />
       </Box>
+
       <CardContent sx={{ flexGrow: 1, px: 2.5, pt: 2.5 }}>
         <Stack direction="row" spacing={1} sx={{ mb: 1.5, flexWrap: 'wrap', gap: 1 }}>
           <Chip size="small" label={labelOf(activeType)} sx={{ bgcolor: activeType === 'uzel' ? 'var(--secondary)' : 'var(--primary)', color: '#fff', fontWeight: 600, fontSize: '0.65rem' }} />
@@ -61,9 +74,11 @@ export default function CatalogCard({
             ID {item.id} • {item.category}
           </Typography>
         </Stack>
+
         <Typography variant="h6" sx={{ lineHeight: 1.2, fontWeight: 700, fontSize: '1.1rem', mb: 1 }}>
           {item.name}
         </Typography>
+
         {activeType === 'uzel' && (
           <Stack direction="row" spacing={0.5} sx={{ mt: 1, flexWrap: 'wrap', gap: 0.5 }}>
             <Chip
@@ -74,6 +89,7 @@ export default function CatalogCard({
             />
           </Stack>
         )}
+
         <Box sx={{ mt: 'auto', pt: 2 }}>
           <Typography variant="h5" sx={{ fontWeight: 800, color: 'var(--primary)' }}>
             {money(adjustedPrice(item.price, settings))}
@@ -83,6 +99,7 @@ export default function CatalogCard({
           </Typography>
         </Box>
       </CardContent>
+
       <CardActions sx={{ p: 2.5, pt: 0 }}>
         <Stack spacing={1.5} sx={{ width: '100%' }}>
           {activeType === 'uzel' && (
@@ -97,16 +114,34 @@ export default function CatalogCard({
               )}
             </Stack>
           )}
-          {cartQty > 0 ? (
-            <Stack direction="row" sx={{ width: '100%', alignItems: 'center', justifyContent: 'space-between', bgcolor: 'rgba(0,0,0,0.05)', borderRadius: '12px', px: 1 }}>
-              <IconButton size="small" onClick={onRemoveFromCart}><RemoveIcon fontSize="small" /></IconButton>
-              <Typography sx={{ fontWeight: 800 }}>{cartQty}</Typography>
-              <IconButton size="small" onClick={onAddToCart}><AddIcon fontSize="small" /></IconButton>
+
+          {manageMode && hasManagementActions && (
+            <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1}>
+              {onEdit && (
+                <Button fullWidth variant="contained" onClick={onEdit} sx={{ borderRadius: '12px', py: 1, bgcolor: 'var(--primary)' }}>
+                  Редактировать
+                </Button>
+              )}
+              {onDelete && (
+                <Button fullWidth variant="outlined" color="error" onClick={onDelete} disabled={deleteInProgress} sx={{ borderRadius: '12px', py: 1 }}>
+                  {deleteInProgress ? 'Удаляю...' : 'Удалить'}
+                </Button>
+              )}
             </Stack>
-          ) : (
-            <Button fullWidth variant="contained" onClick={onAddToCart} sx={{ borderRadius: '12px', py: 1, bgcolor: 'var(--primary)' }}>
-              В смету
-            </Button>
+          )}
+
+          {!manageMode && (
+            cartQty > 0 ? (
+              <Stack direction="row" sx={{ width: '100%', alignItems: 'center', justifyContent: 'space-between', bgcolor: 'rgba(0,0,0,0.05)', borderRadius: '12px', px: 1 }}>
+                <IconButton size="small" onClick={onRemoveFromCart}><RemoveIcon fontSize="small" /></IconButton>
+                <Typography sx={{ fontWeight: 800 }}>{cartQty}</Typography>
+                <IconButton size="small" onClick={onAddToCart}><AddIcon fontSize="small" /></IconButton>
+              </Stack>
+            ) : (
+              <Button fullWidth variant="contained" onClick={onAddToCart} sx={{ borderRadius: '12px', py: 1, bgcolor: 'var(--primary)' }}>
+                В смету
+              </Button>
+            )
           )}
         </Stack>
       </CardActions>

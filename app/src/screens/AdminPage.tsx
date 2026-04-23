@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import Link from 'next/link';
 import {
   Alert,
   Box,
@@ -18,9 +19,10 @@ import {
   TextField,
   Typography,
 } from '@mui/material';
-import { Refresh as RefreshIcon } from '@mui/icons-material';
+import { Refresh as RefreshIcon, ArrowOutward as ArrowOutwardIcon } from '@mui/icons-material';
 import { supabase } from '../supabaseClient';
 import type { AuthState, UserProfile } from '../types';
+import { APP_ROUTES } from '../features/app/navigation';
 import { formatError } from '../utils';
 
 interface AdminPageProps {
@@ -57,8 +59,8 @@ export default function AdminPage({ auth }: AdminPageProps) {
   const [error, setError] = useState('');
 
   const pendingCount = useMemo(
-    () => users.filter(user => user.role === 'viewer').length,
-    [users]
+    () => users.filter((user) => user.role === 'viewer').length,
+    [users],
   );
 
   const loadUsers = useCallback(async () => {
@@ -80,7 +82,7 @@ export default function AdminPage({ auth }: AdminPageProps) {
   }, [auth.isAdmin]);
 
   useEffect(() => {
-    loadUsers();
+    void loadUsers();
   }, [loadUsers]);
 
   async function handleRoleChange(userId: string, role: UserProfile['role']) {
@@ -93,13 +95,9 @@ export default function AdminPage({ auth }: AdminPageProps) {
     });
 
     if (saveError) {
-      console.error('Error setting role:', saveError);
-      setError(`Ошибка сохранения: ${saveError.message || JSON.stringify(saveError)}`);
+      setError(`Ошибка сохранения: ${formatError(saveError)}`);
     } else {
-      setUsers(prev => prev.map(user => user.id === userId ? { ...user, role } : user));
-      const user = users.find(u => u.id === userId);
-      const name = user?.display_name || user?.email || 'Пользователь';
-      alert(`Роль для ${name} успешно изменена на ${role}`);
+      setUsers((prev) => prev.map((user) => (user.id === userId ? { ...user, role } : user)));
     }
 
     setSavingId('');
@@ -116,31 +114,68 @@ export default function AdminPage({ auth }: AdminPageProps) {
   }
 
   return (
-    <Box sx={{ p: 3, maxWidth: 1200, mx: 'auto' }}>
-      <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} sx={{ mb: 3, alignItems: { sm: 'center' }, justifyContent: 'space-between' }}>
-        <Box>
-          <Typography variant="h4">Админка</Typography>
-          <Typography color="text.secondary" sx={{ mt: 0.5 }}>
-            Подтверждай пользователей и закрывай доступ тем, кому каталог больше не нужен.
-          </Typography>
+    <Box sx={{ p: { xs: 2, md: 3 }, maxWidth: 1320, mx: 'auto' }}>
+      <Box
+        sx={{
+          mb: 3,
+          p: '1px',
+          borderRadius: '32px',
+          background: 'linear-gradient(140deg, rgba(11,92,173,0.18), rgba(35,156,140,0.12), rgba(255,255,255,0.8))',
+        }}
+      >
+        <Box
+          sx={{
+            borderRadius: '31px',
+            px: { xs: 2, md: 3 },
+            py: { xs: 2.5, md: 3.25 },
+            bgcolor: 'rgba(255,255,255,0.94)',
+          }}
+        >
+          <Stack direction={{ xs: 'column', lg: 'row' }} spacing={3} sx={{ alignItems: { lg: 'flex-end' }, justifyContent: 'space-between' }}>
+            <Box sx={{ maxWidth: 760 }}>
+              <Typography sx={{ fontSize: { xs: '1.8rem', md: '2.6rem' }, fontWeight: 900, color: '#082B4C', lineHeight: 1 }}>
+                Админка управления доступом и каталогом.
+              </Typography>
+              <Typography sx={{ mt: 1.5, color: 'rgba(8,43,76,0.68)', lineHeight: 1.7 }}>
+                Здесь ты подтверждаешь пользователей, раздаёшь роли и переходишь в отдельную premium-панель каталога, где можно редактировать товары, услуги и узлы.
+              </Typography>
+            </Box>
+
+            <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.25}>
+              <Button
+                variant="contained"
+                component={Link}
+                href={APP_ROUTES.catalogManager}
+                endIcon={<ArrowOutwardIcon />}
+                sx={{ borderRadius: '999px', px: 2.5, py: 1.15, textTransform: 'none' }}
+              >
+                Открыть каталог
+              </Button>
+              <Button
+                variant="outlined"
+                startIcon={<RefreshIcon />}
+                onClick={loadUsers}
+                disabled={loading}
+                sx={{ borderRadius: '999px', px: 2.5, py: 1.15, textTransform: 'none' }}
+              >
+                Обновить
+              </Button>
+            </Stack>
+          </Stack>
         </Box>
+      </Box>
 
-        <Button variant="outlined" startIcon={<RefreshIcon />} onClick={loadUsers} disabled={loading}>
-          Обновить
-        </Button>
-      </Stack>
-
-      <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} sx={{ mb: 3 }}>
-        <Card sx={{ minWidth: 220 }}>
+      <Stack direction={{ xs: 'column', md: 'row' }} spacing={2} sx={{ mb: 3 }}>
+        <Card sx={{ minWidth: 220, borderRadius: '24px' }}>
           <CardContent>
             <Typography variant="body2" color="text.secondary">Всего пользователей</Typography>
-            <Typography variant="h4">{users.length}</Typography>
+            <Typography variant="h4" sx={{ fontWeight: 800 }}>{users.length}</Typography>
           </CardContent>
         </Card>
-        <Card sx={{ minWidth: 220 }}>
+        <Card sx={{ minWidth: 220, borderRadius: '24px' }}>
           <CardContent>
             <Typography variant="body2" color="text.secondary">Ждут подтверждения</Typography>
-            <Typography variant="h4">{pendingCount}</Typography>
+            <Typography variant="h4" sx={{ fontWeight: 800 }}>{pendingCount}</Typography>
           </CardContent>
         </Card>
       </Stack>
@@ -151,7 +186,7 @@ export default function AdminPage({ auth }: AdminPageProps) {
         </Alert>
       )}
 
-      <Card>
+      <Card sx={{ borderRadius: '28px' }}>
         <CardContent>
           {loading ? (
             <Stack direction="row" spacing={2} sx={{ alignItems: 'center' }}>
@@ -171,7 +206,7 @@ export default function AdminPage({ auth }: AdminPageProps) {
                   </TableRow>
                 </TableHead>
                 <TableBody>
-                  {users.map(user => (
+                  {users.map((user) => (
                     <TableRow key={user.id}>
                       <TableCell>
                         <Typography sx={{ fontWeight: 700 }}>{user.email || user.display_name || 'Без email'}</Typography>
@@ -193,7 +228,7 @@ export default function AdminPage({ auth }: AdminPageProps) {
                           size="small"
                           value={user.role}
                           disabled={savingId === user.id}
-                          onChange={(event) => handleRoleChange(user.id, event.target.value as UserProfile['role'])}
+                          onChange={(event) => void handleRoleChange(user.id, event.target.value as UserProfile['role'])}
                           fullWidth
                         >
                           <MenuItem value="viewer">Ждёт подтверждения</MenuItem>

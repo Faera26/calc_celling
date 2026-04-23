@@ -107,7 +107,11 @@ export function useCatalog({ authReady, userId, userEmail, initialType }: UseCat
     ? []
     : subcategoriesByCategory[activeCategory] || [];
 
-  const refresh = useCallback(() => setCatalogRefresh((prev) => prev + 1), []);
+  const refresh = useCallback(() => {
+    setCategoriesLoaded(false);
+    setSubcategoriesByCategory({});
+    setCatalogRefresh((prev) => prev + 1);
+  }, []);
 
   const resetFilters = useCallback(() => {
     setSearch('');

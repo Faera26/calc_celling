@@ -9,11 +9,13 @@ import {
   TextField,
 } from '@mui/material';
 import type { CatalogType, ItemForm } from '../types';
+import type { CatalogDialogMode } from '../features/catalog/catalogCrud';
 import { labelOf } from '../utils';
 
 interface AddItemDialogProps {
   open: boolean;
   activeType: CatalogType;
+  mode?: CatalogDialogMode;
   form: ItemForm;
   saving: boolean;
   error: string;
@@ -25,6 +27,7 @@ interface AddItemDialogProps {
 export default function AddItemDialog({
   open,
   activeType,
+  mode = 'create',
   form,
   saving,
   error,
@@ -32,79 +35,95 @@ export default function AddItemDialog({
   onSave,
   onFormChange,
 }: AddItemDialogProps) {
+  const isEditMode = mode === 'edit';
+
   return (
     <Dialog open={open} onClose={onClose} fullWidth maxWidth="sm">
       <DialogTitle>
-        Р”РѕР±Р°РІРёС‚СЊ: {labelOf(activeType).toLowerCase()}
+        {isEditMode ? `Редактировать: ${labelOf(activeType).toLowerCase()}` : `Добавить: ${labelOf(activeType).toLowerCase()}`}
       </DialogTitle>
+
       <DialogContent dividers>
         <Stack spacing={2} sx={{ mt: 1 }}>
           <TextField
             label="ID"
             value={form.id}
-            onChange={(e) => onFormChange({ id: e.target.value })}
-            helperText="РњРѕР¶РЅРѕ РѕСЃС‚Р°РІРёС‚СЊ РїСѓСЃС‚С‹Рј, РїСЂРёР»РѕР¶РµРЅРёРµ СЃРѕР·РґР°СЃС‚ ID Р°РІС‚РѕРјР°С‚РёС‡РµСЃРєРё. Р”Р»СЏ РёРјРїРѕСЂС‚РѕРІ Р»СѓС‡С€Рµ Р·Р°РґР°РІР°С‚СЊ СЃС‚Р°Р±РёР»СЊРЅС‹Р№ ID."
+            disabled={isEditMode}
+            onChange={(event) => onFormChange({ id: event.target.value })}
+            helperText={
+              isEditMode
+                ? 'ID лучше не менять, чтобы не потерять связи в каталоге и сметах.'
+                : 'Можно оставить пустым, тогда система создаст ID автоматически.'
+            }
           />
+
           <TextField
-            label="РќР°Р·РІР°РЅРёРµ"
+            label="Название"
             value={form.name}
-            onChange={(e) => onFormChange({ name: e.target.value })}
+            onChange={(event) => onFormChange({ name: event.target.value })}
             required
           />
+
           <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}>
             <TextField
               fullWidth
-              label="РљР°С‚РµРіРѕСЂРёСЏ"
+              label="Категория"
               value={form.category}
-              onChange={(e) => onFormChange({ category: e.target.value })}
+              onChange={(event) => onFormChange({ category: event.target.value })}
             />
             <TextField
               fullWidth
-              label="РџРѕРґРєР°С‚РµРіРѕСЂРёСЏ"
+              label="Подкатегория"
               value={form.subcategory}
-              onChange={(e) => onFormChange({ subcategory: e.target.value })}
+              onChange={(event) => onFormChange({ subcategory: event.target.value })}
             />
           </Stack>
+
           <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}>
             <TextField
               fullWidth
-              label="Р¦РµРЅР°"
+              label="Цена"
               type="number"
               value={form.price}
-              onChange={(e) => onFormChange({ price: e.target.value })}
+              onChange={(event) => onFormChange({ price: event.target.value })}
             />
             <TextField
               fullWidth
-              label="Р•Рґ. РёР·Рј."
+              label="Ед. изм."
               value={form.unit}
-              onChange={(e) => onFormChange({ unit: e.target.value })}
-              placeholder="С€С‚., Рј. Рї., РјВІ"
+              onChange={(event) => onFormChange({ unit: event.target.value })}
+              placeholder="шт., м. п., м2"
             />
           </Stack>
+
           <TextField
-            label="РЎСЃС‹Р»РєР° РЅР° РєР°СЂС‚РёРЅРєСѓ"
+            label="Ссылка на картинку"
             value={form.image}
-            onChange={(e) => onFormChange({ image: e.target.value })}
+            onChange={(event) => onFormChange({ image: event.target.value })}
           />
+
           <TextField
-            label="РћРїРёСЃР°РЅРёРµ"
+            label="Описание"
             multiline
             minRows={3}
             value={form.description}
-            onChange={(e) => onFormChange({ description: e.target.value })}
+            onChange={(event) => onFormChange({ description: event.target.value })}
           />
+
           {activeType === 'uzel' && (
             <Alert severity="info">
-              РЎРµР№С‡Р°СЃ РґРѕР±Р°РІР»СЏРµС‚СЃСЏ РєР°СЂС‚РѕС‡РєР° СѓР·Р»Р°. РџРѕСЃР»Рµ СЃРѕС…СЂР°РЅРµРЅРёСЏ РѕС‚РєСЂРѕР№ &quot;РљРѕРЅСЃС‚СЂСѓРєС‚РѕСЂ&quot;, С‡С‚РѕР±С‹ РґРѕР±Р°РІРёС‚СЊ С‚РѕРІР°СЂС‹ Рё СѓСЃР»СѓРіРё РІРЅСѓС‚СЂСЊ СѓР·Р»Р°.
+              Для узла карточка хранит только общие данные. Состав материалов и услуг редактируется отдельно в конструкторе узла.
             </Alert>
           )}
+
           {error && <Alert severity="error">{error}</Alert>}
         </Stack>
       </DialogContent>
+
       <DialogActions>
-        <Button onClick={onClose}>РћС‚РјРµРЅР°</Button>
+        <Button onClick={onClose}>Отмена</Button>
         <Button variant="contained" disabled={saving} onClick={onSave}>
-          {saving ? 'РЎРѕС…СЂР°РЅСЏСЋ...' : 'РЎРѕС…СЂР°РЅРёС‚СЊ'}
+          {saving ? 'Сохраняю...' : isEditMode ? 'Сохранить изменения' : 'Создать позицию'}
         </Button>
       </DialogActions>
     </Dialog>

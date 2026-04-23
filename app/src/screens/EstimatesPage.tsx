@@ -53,6 +53,12 @@ import {
   summarizeSavedEstimatePositions,
   toNumber as num,
 } from '../features/estimates/calculationEngine';
+import {
+  getNextEstimateSelectionId,
+  resolveEstimateSelectionId,
+} from '../features/estimates/estimateSelection';
+import ConfirmDialog from '../components/ConfirmDialog';
+import { deleteEstimateDocument } from '../features/estimates/estimateCrud';
 import { cleanSearch, money, withTimeout } from '../utils';
 import { restDelete, restInsert, restSelect, restUpdate } from '../supabaseRest';
 import { readStoredAuthUser, supabase } from '../supabaseClient';
@@ -102,6 +108,13 @@ interface CatalogSearchOption {
   image?: string | null;
   description?: string | null;
   type: 'tovar' | 'usluga' | 'uzel';
+}
+
+interface DeleteEstimateTarget {
+  id: string;
+  label: string;
+  roomCount: number;
+  positionCount: number;
 }
 
 const COMMON_ROOM = 'common';
@@ -201,6 +214,11 @@ function reindexPositions(positions: SavedEstimatePosition[]) {
   }));
 }
 
+function estimateDisplayName(estimate: SavedEstimate | undefined) {
+  if (!estimate) return 'Без названия';
+  return estimate.title || estimate.client_name || 'Без названия';
+}
+
 export default function EstimatesPage({ auth, settings }: EstimatesPageProps) {
   const storedUser = readStoredAuthUser();
   const resolvedUserId = auth.userId || storedUser?.id || '';
@@ -224,12 +242,14 @@ export default function EstimatesPage({ auth, settings }: EstimatesPageProps) {
   const [loading, setLoading] = useState(true);
   const [detailsLoading, setDetailsLoading] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [deletingEstimate, setDeletingEstimate] = useState(false);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [addDraft, setAddDraft] = useState<AddLocalPositionDraft>(() => emptyAddDraft());
   const [editingPositionId, setEditingPositionId] = useState<string | null>(null);
   const [draggedPositionId, setDraggedPositionId] = useState<string | null>(null);
   const [dragOverPositionId, setDragOverPositionId] = useState<string | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<DeleteEstimateTarget | null>(null);
 
   const selectedEstimate = useMemo(
     () => estimates.find((estimate) => estimate.id === selectedId) || estimates[0],
@@ -289,7 +309,7 @@ export default function EstimatesPage({ auth, settings }: EstimatesPageProps) {
     return () => window.clearTimeout(timer);
   }, [catalogSearch]);
 
-  const loadEstimates = useCallback(async () => {
+  const loadEstimates = useCallback(async (preferredSelectedId?: string | null) => {
     setLoading(true);
     setError('');
 
@@ -321,17 +341,19 @@ export default function EstimatesPage({ auth, settings }: EstimatesPageProps) {
       }
 
       setEstimates(rows);
-      if (!selectedId && rows[0]) {
-        setSelectedId(rows[0].id);
-      }
+      setSelectedId((currentSelectedId) => resolveEstimateSelectionId(
+        rows,
+        preferredSelectedId ?? currentSelectedId
+      ));
     } catch (loadError) {
       const message = loadError instanceof Error ? loadError.message : String(loadError);
       setError(`${message} Проверь миграции смет.`);
       setEstimates([]);
+      setSelectedId('');
     }
 
     setLoading(false);
-  }, [selectedId]);
+  }, []);
 
   useEffect(() => {
     if (!resolvedUserId) {
@@ -572,6 +594,48 @@ export default function EstimatesPage({ auth, settings }: EstimatesPageProps) {
     }
   }
 
+  function openDeleteEstimateDialog() {
+    if (!selectedEstimate) return;
+
+    setDeleteTarget({
+      id: selectedEstimate.id,
+      label: estimateDisplayName(selectedEstimate),
+      roomCount: roomDrafts.length,
+      positionCount: positionDrafts.length,
+    });
+  }
+
+  async function handleDeleteEstimate() {
+    if (!deleteTarget) return;
+
+    setDeletingEstimate(true);
+    setError('');
+    setNotice('');
+
+    const estimateId = deleteTarget.id;
+    const nextSelectedId = getNextEstimateSelectionId(estimates, estimateId);
+    const nextEstimates = estimates.filter((estimate) => estimate.id !== estimateId);
+
+    try {
+      await deleteEstimateDocument(estimateId);
+
+      setEstimates(nextEstimates);
+      setSelectedId(resolveEstimateSelectionId(nextEstimates, nextSelectedId));
+      setDeleteTarget(null);
+      setEditingPositionId(null);
+      setDraggedPositionId(null);
+      setDragOverPositionId(null);
+      setAddDraft(emptyAddDraft());
+      setDeletedRoomIds([]);
+      setDeletedPositionIds([]);
+      setNotice(`Смета "${deleteTarget.label}" удалена.`);
+    } catch (deleteError) {
+      setError(deleteError instanceof Error ? deleteError.message : String(deleteError));
+    } finally {
+      setDeletingEstimate(false);
+    }
+  }
+
   async function saveEstimateEditor() {
     if (!selectedEstimate) return;
 
@@ -713,7 +777,7 @@ export default function EstimatesPage({ auth, settings }: EstimatesPageProps) {
             Менеджерский редактор сохранённых смет.
           </Typography>
         </Box>
-        <Button variant="outlined" startIcon={<RefreshIcon />} onClick={loadEstimates} disabled={loading}>
+        <Button variant="outlined" startIcon={<RefreshIcon />} onClick={() => void loadEstimates()} disabled={loading}>
           Обновить
         </Button>
       </Stack>
@@ -774,10 +838,20 @@ export default function EstimatesPage({ auth, settings }: EstimatesPageProps) {
                       <Typography variant="h4" color="primary.main">{money(currentTotal)}</Typography>
                     </Box>
                     <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} sx={{ width: { xs: '100%', md: 'auto' } }}>
+                      <Button
+                        variant="outlined"
+                        color="error"
+                        startIcon={<DeleteIcon />}
+                        disabled={saving || detailsLoading || deletingEstimate}
+                        onClick={openDeleteEstimateDialog}
+                        fullWidth={isCompactLayout}
+                      >
+                        Удалить смету
+                      </Button>
                       <Button variant="outlined" startIcon={<PdfIcon />} disabled={positionDrafts.length === 0} onClick={handlePdfExport} fullWidth={isCompactLayout}>
                         PDF
                       </Button>
-                      <Button variant="contained" startIcon={<SaveIcon />} disabled={saving || detailsLoading} onClick={saveEstimateEditor} fullWidth={isCompactLayout}>
+                      <Button variant="contained" startIcon={<SaveIcon />} disabled={saving || detailsLoading || deletingEstimate} onClick={saveEstimateEditor} fullWidth={isCompactLayout}>
                         {saving ? 'Сохраняю...' : 'Сохранить изменения'}
                       </Button>
                     </Stack>
@@ -1263,6 +1337,27 @@ export default function EstimatesPage({ auth, settings }: EstimatesPageProps) {
           </Box>
         </Stack>
       )}
+
+      <ConfirmDialog
+        open={Boolean(deleteTarget)}
+        title="Удалить смету целиком?"
+        description="Это действие удалит смету вместе со всеми комнатами и позициями. Отменить его не получится."
+        confirmLabel="Удалить навсегда"
+        confirmColor="error"
+        tone="danger"
+        loading={deletingEstimate}
+        onClose={() => setDeleteTarget(null)}
+        onConfirm={handleDeleteEstimate}
+      >
+        <Stack spacing={0.75}>
+          <Typography sx={{ fontWeight: 700 }}>
+            {deleteTarget?.label || estimateDisplayName(selectedEstimate)}
+          </Typography>
+          <Typography variant="body2" color="text.secondary">
+            Комнат: {deleteTarget?.roomCount ?? roomDrafts.length} · Позиций: {deleteTarget?.positionCount ?? positionDrafts.length}
+          </Typography>
+        </Stack>
+      </ConfirmDialog>
 
       {editingPosition && (
         <Dialog open onClose={() => setEditingPositionId(null)} maxWidth="md" fullWidth fullScreen={isCompactLayout}>

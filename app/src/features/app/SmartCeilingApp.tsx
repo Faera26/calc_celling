@@ -10,13 +10,14 @@ import { useCart } from '../../hooks/useCart';
 import { useSettings } from '../../hooks/useSettings';
 import AdminPage from '../../screens/AdminPage';
 import CatalogPage from '../../screens/CatalogPage';
+import CatalogManagerPage from '../../screens/CatalogManagerPage';
 import EstimatesPage from '../../screens/EstimatesPage';
 import LoginPage from '../../screens/LoginPage';
 import PendingAccessPage from '../../screens/PendingAccessPage';
 import ProfilePage from '../../screens/ProfilePage';
 import type { CatalogType } from '../../types';
 
-type SmartCeilingPage = 'catalog' | 'estimates' | 'profile' | 'admin';
+type SmartCeilingPage = 'catalog' | 'catalog-manager' | 'estimates' | 'profile' | 'admin';
 
 interface SmartCeilingAppProps {
   page: SmartCeilingPage;
@@ -47,8 +48,11 @@ export default function SmartCeilingApp({ page, catalogType = 'tovar' }: SmartCe
     profileReady: auth.profileReady,
   });
   const cart = useCart(settings.settings);
-  const [search, setSearch] = useState('');
+  const [catalogSearch, setCatalogSearch] = useState('');
+  const [catalogManagerSearch, setCatalogManagerSearch] = useState('');
   const [catalogRefreshToggle, setCatalogRefreshToggle] = useState(0);
+  const activeSearch = page === 'catalog-manager' ? catalogManagerSearch : catalogSearch;
+  const setActiveSearch = page === 'catalog-manager' ? setCatalogManagerSearch : setCatalogSearch;
 
   // Сначала ждём auth и профиль. Пока они не готовы, нельзя надёжно решить,
   // какой экран нужно показать пользователю.
@@ -91,6 +95,17 @@ export default function SmartCeilingApp({ page, catalogType = 'tovar' }: SmartCe
       return <AdminPage auth={auth} />;
     }
 
+    if (page === 'catalog-manager') {
+      return (
+        <CatalogManagerPage
+          auth={auth}
+          settings={settings.settings}
+          search={catalogManagerSearch}
+          catalogRefreshToggle={catalogRefreshToggle}
+        />
+      );
+    }
+
     return (
       <CatalogPage
         auth={auth}
@@ -99,7 +114,7 @@ export default function SmartCeilingApp({ page, catalogType = 'tovar' }: SmartCe
         initialType={catalogType}
         onAddToCart={cart.addToCart}
         onRemoveFromCart={cart.removeFromCart}
-        search={search}
+        search={catalogSearch}
         catalogRefreshToggle={catalogRefreshToggle}
       />
     );
@@ -110,8 +125,8 @@ export default function SmartCeilingApp({ page, catalogType = 'tovar' }: SmartCe
       <AppLayout
         auth={auth}
         settings={settings.settings}
-        search={search}
-        onSearchChange={setSearch}
+        search={activeSearch}
+        onSearchChange={setActiveSearch}
         cartCount={cart.cartCount}
         onCartOpen={() => cart.setIsCartOpen(true)}
         onSettingsOpen={() => settings.setIsSettingsOpen(true)}

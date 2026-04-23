@@ -93,12 +93,18 @@ export default function CatalogPage({
     }
   }, [catalogRefreshToggle, refreshCatalog]);
 
-  function handleViewNode(node: UzelItem) {
+  function handleViewNode(item: CatalogItem) {
+    if (catalog.activeType !== 'uzel') return;
+
+    const node = item as UzelItem;
     setSelectedNode(node);
     openNodeDetails(node, catalog.loadNodeComponents, setNodeDetailsLoading, catalog.setLoadError);
   }
 
-  function handleOpenConstructor(node: UzelItem) {
+  function handleOpenConstructor(item: CatalogItem) {
+    if (catalog.activeType !== 'uzel') return;
+
+    const node = item as UzelItem;
     setSelectedNode(null);
     constructor.openConstructor(node, catalog.loadNodeComponents);
   }
