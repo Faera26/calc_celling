@@ -106,6 +106,7 @@ export default function SmartCeilingApp({ page, catalogType = 'tovar' }: SmartCe
           auth={auth}
           settings={settings.settings}
           search={catalogManagerSearch}
+          onSearchChange={setCatalogManagerSearch}
           catalogRefreshToggle={catalogRefreshToggle}
         />
       );
@@ -120,6 +121,7 @@ export default function SmartCeilingApp({ page, catalogType = 'tovar' }: SmartCe
         onAddToCart={cart.addToCart}
         onRemoveFromCart={cart.removeFromCart}
         search={catalogSearch}
+        onSearchChange={setCatalogSearch}
         catalogRefreshToggle={catalogRefreshToggle}
       />
     );

@@ -57,6 +57,7 @@ interface CatalogPageProps {
   onAddToCart: (type: CatalogType, item: CatalogItem, components?: UzelComponent[]) => void;
   onRemoveFromCart: (cartKey: string) => void;
   search: string;
+  onSearchChange: (value: string) => void;
   catalogRefreshToggle: number;
 }
 
@@ -68,6 +69,7 @@ export default function CatalogPage({
   onAddToCart,
   onRemoveFromCart,
   search,
+  onSearchChange,
   catalogRefreshToggle,
 }: CatalogPageProps) {
   const catalog = useCatalog({
@@ -282,8 +284,8 @@ export default function CatalogPage({
 
       <TextField
         fullWidth
-        value={catalog.search}
-        onChange={(event) => setCatalogSearch(event.target.value)}
+        value={search}
+        onChange={(event) => onSearchChange(event.target.value)}
         placeholder="Поиск по названию позиции: профиль, светильник, гардина..."
         sx={{
           mb: 2.5,
@@ -300,12 +302,12 @@ export default function CatalogPage({
                 <SearchIcon color="primary" />
               </InputAdornment>
             ),
-            endAdornment: catalog.search ? (
+            endAdornment: search ? (
               <InputAdornment position="end">
                 <IconButton
                   aria-label="Очистить поиск"
                   edge="end"
-                  onClick={() => setCatalogSearch('')}
+                  onClick={() => onSearchChange('')}
                 >
                   <CloseIcon />
                 </IconButton>

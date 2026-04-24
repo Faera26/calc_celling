@@ -51,6 +51,7 @@ interface CatalogManagerPageProps {
   auth: AuthState;
   settings: CompanySettings;
   search: string;
+  onSearchChange: (value: string) => void;
   catalogRefreshToggle: number;
 }
 
@@ -80,6 +81,7 @@ export default function CatalogManagerPage({
   auth,
   settings,
   search,
+  onSearchChange,
   catalogRefreshToggle,
 }: CatalogManagerPageProps) {
   const router = useRouter();
@@ -513,8 +515,8 @@ export default function CatalogManagerPage({
 
             <TextField
               fullWidth
-              value={catalog.search}
-              onChange={(event) => setCatalogSearch(event.target.value)}
+              value={search}
+              onChange={(event) => onSearchChange(event.target.value)}
               placeholder="Поиск по названию позиции: профиль, светильник, гардина..."
               sx={{
                 '& .MuiOutlinedInput-root': {
@@ -530,12 +532,12 @@ export default function CatalogManagerPage({
                       <SearchIcon color="primary" />
                     </InputAdornment>
                   ),
-                  endAdornment: catalog.search ? (
+                  endAdornment: search ? (
                     <InputAdornment position="end">
                       <IconButton
                         aria-label="Очистить поиск"
                         edge="end"
-                        onClick={() => setCatalogSearch('')}
+                        onClick={() => onSearchChange('')}
                       >
                         <CloseIcon />
                       </IconButton>
