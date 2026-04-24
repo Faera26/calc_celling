@@ -4,6 +4,8 @@ app/dist-ssr/
 app/*.local
 app/.env
 .agents/
+__pycache__/
+*.pyc
 *.md
 !README.md
 !app/README.md
