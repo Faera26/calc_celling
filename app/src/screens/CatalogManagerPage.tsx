@@ -6,13 +6,18 @@ import {
   Box,
   Button,
   Chip,
+  IconButton,
+  InputAdornment,
   Stack,
+  TextField,
   Typography,
 } from '@mui/material';
 import {
   Add as AddIcon,
   AutoAwesome as AutoAwesomeIcon,
+  CloseRounded as CloseIcon,
   DeleteOutlined as DeleteOutlineIcon,
+  SearchRounded as SearchIcon,
 } from '@mui/icons-material';
 import type {
   AuthState,
@@ -505,6 +510,40 @@ export default function CatalogManagerPage({
                 </Stack>
               )}
             </Stack>
+
+            <TextField
+              fullWidth
+              value={catalog.search}
+              onChange={(event) => setCatalogSearch(event.target.value)}
+              placeholder="Поиск по названию позиции: профиль, светильник, гардина..."
+              sx={{
+                '& .MuiOutlinedInput-root': {
+                  borderRadius: '22px',
+                  bgcolor: '#fff',
+                  boxShadow: '0 14px 36px rgba(15, 23, 42, 0.07)',
+                },
+              }}
+              slotProps={{
+                input: {
+                  startAdornment: (
+                    <InputAdornment position="start">
+                      <SearchIcon color="primary" />
+                    </InputAdornment>
+                  ),
+                  endAdornment: catalog.search ? (
+                    <InputAdornment position="end">
+                      <IconButton
+                        aria-label="Очистить поиск"
+                        edge="end"
+                        onClick={() => setCatalogSearch('')}
+                      >
+                        <CloseIcon />
+                      </IconButton>
+                    </InputAdornment>
+                  ) : null,
+                },
+              }}
+            />
 
             <CatalogHierarchyPicker
               title={`Навигация по каталогу ${titleOf(catalog.activeType).toLowerCase()}`}
