@@ -234,9 +234,12 @@ export default function CatalogPage({
     }
   }
 
-  const selectionHint = !catalog.selectionReady
-    ? 'Выбери категорию и подкатегорию. Только после этого подгрузится страница позиций.'
+  const selectionHint = !catalog.itemsReady
+    ? 'Выбери категорию и подкатегорию или начни поиск по названию позиции.'
     : '';
+  const resultScope = catalog.searchReady
+    ? `Поиск: ${catalog.debouncedSearch}${catalog.selectionReady ? ` • ${catalog.activeCategory} → ${catalog.activeSubcategory}` : ''}`
+    : `${catalog.activeCategory} → ${catalog.activeSubcategory}`;
 
   return (
     <Box sx={{ p: 3, maxWidth: 1600, mx: 'auto' }}>
@@ -305,18 +308,18 @@ export default function CatalogPage({
         </Alert>
       )}
 
-      {catalog.selectionReady && (
+      {catalog.itemsReady && (
         <Stack direction="row" sx={{ mb: 2, alignItems: 'center', justifyContent: 'space-between' }}>
           <Typography variant="h6" sx={{ fontWeight: 800 }}>
             {catalog.itemsTotal.toLocaleString('ru-RU')} позиций
           </Typography>
           <Typography variant="body2" color="text.secondary">
-            {catalog.activeCategory} → {catalog.activeSubcategory}
+            {resultScope}
           </Typography>
         </Stack>
       )}
 
-      {catalog.selectionReady && (
+      {catalog.itemsReady && (
         <CatalogGrid
           items={catalog.items}
           activeType={catalog.activeType}
@@ -336,7 +339,7 @@ export default function CatalogPage({
         />
       )}
 
-      {catalog.selectionReady && !catalog.itemsLoading && catalog.items.length === 0 && (
+      {catalog.itemsReady && !catalog.itemsLoading && catalog.items.length === 0 && (
         <EmptyState
           activeType={catalog.activeType}
           activeCategory={catalog.activeCategory}
@@ -348,7 +351,7 @@ export default function CatalogPage({
         />
       )}
 
-      {catalog.selectionReady && (
+      {catalog.itemsReady && (
         <PaginationControls
           page={catalog.page}
           totalPages={catalog.totalPages}

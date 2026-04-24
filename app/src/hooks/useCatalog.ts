@@ -100,6 +100,8 @@ export function useCatalog({ authReady, userId, userEmail, initialType }: UseCat
   const [catalogRefresh, setCatalogRefresh] = useState(0);
 
   const selectionReady = activeCategory !== ALL_OPTION && activeSubcategory !== ALL_OPTION;
+  const searchReady = Boolean(debouncedSearch);
+  const itemsReady = selectionReady || searchReady;
   const filterIsActive = activeCategory !== ALL_OPTION || activeSubcategory !== ALL_OPTION || Boolean(debouncedSearch);
   const totalPages = Math.max(1, Math.ceil(itemsTotal / PAGE_SIZE));
   const nextPageDisabled = !hasNextPage && page >= totalPages;
@@ -294,7 +296,7 @@ export function useCatalog({ authReady, userId, userEmail, initialType }: UseCat
   useEffect(() => {
     if (!authReady || !resolvedUserEmail || !resolvedUserId) return;
 
-    if (!selectionReady) {
+    if (!itemsReady) {
       setItems([]);
       setItemsTotal(0);
       setHasNextPage(false);
@@ -311,12 +313,12 @@ export function useCatalog({ authReady, userId, userEmail, initialType }: UseCat
         const from = (page - 1) * PAGE_SIZE;
         const table = tableOf(activeType);
         const filters = {
-          category: activeCategory,
-          subcategory: activeSubcategory,
+          ...(activeCategory !== ALL_OPTION ? { category: activeCategory } : {}),
+          ...(activeSubcategory !== ALL_OPTION ? { subcategory: activeSubcategory } : {}),
         };
 
-        // После выбора категории и подкатегории тянем только одну страницу позиций
-        // и отдельный count для нормальной пагинации.
+        // Без поиска каталог остаётся ленивым: грузим позиции только после выбора подкатегории.
+        // Если менеджер ищет по названию, даём быстрый глобальный поиск без лишних кликов.
         const [pageData, totalCount] = await Promise.all([
           withTimeout(
             restSelect<CatalogItem>(table, {
@@ -372,7 +374,7 @@ export function useCatalog({ authReady, userId, userEmail, initialType }: UseCat
     page,
     resolvedUserEmail,
     resolvedUserId,
-    selectionReady,
+    itemsReady,
     catalogRefresh,
   ]);
 
@@ -425,6 +427,8 @@ export function useCatalog({ authReady, userId, userEmail, initialType }: UseCat
     setPage,
     filterIsActive,
     selectionReady,
+    searchReady,
+    itemsReady,
     totalPages,
     nextPageDisabled,
     nodeComponents,

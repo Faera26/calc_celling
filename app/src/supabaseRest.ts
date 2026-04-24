@@ -105,10 +105,7 @@ function addSearch(query: URLSearchParams, search?: string) {
   if (!search) return;
 
   const pattern = `*${search}*`;
-  query.set(
-    'or',
-    `id.ilike.${pattern},name.ilike.${pattern},category.ilike.${pattern},subcategory.ilike.${pattern}`
-  );
+  query.set('name', `ilike.${pattern}`);
 }
 
 function addRange(query: URLSearchParams, limit?: number, offset?: number) {

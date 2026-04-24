@@ -256,9 +256,12 @@ export default function CatalogManagerPage({
     }
   }
 
-  const selectionHint = !catalog.selectionReady
-    ? 'Выбери категорию и подкатегорию. Только после этого загрузится конкретная страница каталога.'
+  const selectionHint = !catalog.itemsReady
+    ? 'Выбери категорию и подкатегорию или начни поиск по названию позиции.'
     : '';
+  const resultScope = catalog.searchReady
+    ? `Поиск: ${catalog.debouncedSearch}${catalog.selectionReady ? ` • ${catalog.activeCategory} → ${catalog.activeSubcategory}` : ''}`
+    : `${catalog.activeCategory} → ${catalog.activeSubcategory}`;
 
   return (
     <Box sx={{ p: { xs: 2, md: 3.5 }, maxWidth: 1680, mx: 'auto' }}>
@@ -495,10 +498,10 @@ export default function CatalogManagerPage({
                 </Typography>
               </Box>
 
-              {catalog.selectionReady && (
+              {catalog.itemsReady && (
                 <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1}>
                   <Chip label={`${catalog.itemsTotal.toLocaleString('ru-RU')} поз.`} sx={{ borderRadius: '999px', fontWeight: 700 }} />
-                  <Chip label={`${catalog.activeCategory} → ${catalog.activeSubcategory}`} sx={{ borderRadius: '999px', fontWeight: 700 }} />
+                  <Chip label={resultScope} sx={{ borderRadius: '999px', fontWeight: 700 }} />
                 </Stack>
               )}
             </Stack>
@@ -528,7 +531,7 @@ export default function CatalogManagerPage({
               <Alert severity="info">{selectionHint}</Alert>
             )}
 
-            {catalog.selectionReady && (
+            {catalog.itemsReady && (
               <>
                 <CatalogGrid
                   items={catalog.items}
