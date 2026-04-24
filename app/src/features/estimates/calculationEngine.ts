@@ -5,7 +5,9 @@ import type {
   EstimateCalculationMetric,
   EstimateCalculationRule,
   EstimateComponentSnapshot,
+  EstimateDocumentType,
   EstimateItemSnapshot,
+  EstimatePdfTemplate,
   EstimateSaveDraft,
   EstimateSourceSnapshot,
   EstimateStatus,
@@ -65,6 +67,9 @@ export interface CalculatedEstimate {
   objectAddress: string | null;
   clientComment: string | null;
   status: EstimateStatus;
+  documentType: EstimateDocumentType;
+  pdfTemplate: EstimatePdfTemplate;
+  pdfAccentColor: string;
   rooms: CalculatedEstimateRoom[];
   positions: CalculatedEstimatePosition[];
   summary: CalculatedEstimateSummary;
@@ -100,6 +105,9 @@ export interface EstimateRecordPayloads {
     subtotal: number;
     total: number;
     status: EstimateStatus;
+    document_type: EstimateDocumentType;
+    pdf_template: EstimatePdfTemplate;
+    pdf_accent_color: string;
     title: string;
     client_email: string | null;
     object_address: string | null;
@@ -310,6 +318,9 @@ export function calculateEstimate(input: CalculateEstimateInput): CalculatedEsti
     objectAddress: normalizeText(input.draft.objectAddress),
     clientComment: normalizeText(input.draft.clientComment),
     status: input.draft.status,
+    documentType: input.draft.documentType || 'preliminary',
+    pdfTemplate: input.draft.pdfTemplate || input.settings.defaultPdfTemplate,
+    pdfAccentColor: normalizeText(input.draft.pdfAccentColor) || input.settings.defaultPdfAccentColor,
     rooms,
     positions,
     summary: {
@@ -346,6 +357,9 @@ export function buildEstimateRecordPayloads(userId: string, estimate: Calculated
     baseEstimatePayload,
     extendedEstimatePayload: {
       ...baseEstimatePayload,
+      document_type: estimate.documentType,
+      pdf_template: estimate.pdfTemplate,
+      pdf_accent_color: estimate.pdfAccentColor,
       title: estimate.title,
       client_email: estimate.clientEmail,
       object_address: estimate.objectAddress,

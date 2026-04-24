@@ -24,8 +24,11 @@ import {
 import { Add as AddIcon, Delete as DeleteIcon } from '@mui/icons-material';
 import type {
   CartRow,
+  CompanySettings,
+  EstimateDocumentType,
   EstimateCalculationMetric,
   EstimateCalculationRule,
+  EstimatePdfTemplate,
   EstimateRoomDraft,
   EstimateSaveDraft,
   EstimateStatus,
@@ -56,16 +59,7 @@ interface SaveEstimateDialogProps {
   total: number;
   saving: boolean;
   error: string;
-  settings: {
-    companyName: string;
-    managerName: string;
-    phone: string;
-    email: string;
-    avatarDataUrl: string;
-    marginPercent: number;
-    discountPercent: number;
-    pdfNote: string;
-  };
+  settings: CompanySettings;
   onClose: () => void;
   onSave: (draft: EstimateSaveDraft) => void;
 }
@@ -85,7 +79,7 @@ function emptyRoom(index: number): EstimateRoomDraft {
   };
 }
 
-function defaultDraft(): EstimateSaveDraft {
+function defaultDraft(settings: CompanySettings): EstimateSaveDraft {
   return {
     title: `Смета от ${new Date().toLocaleDateString('ru-RU')}`,
     clientName: '',
@@ -94,6 +88,9 @@ function defaultDraft(): EstimateSaveDraft {
     objectAddress: '',
     clientComment: '',
     status: 'draft',
+    documentType: 'preliminary',
+    pdfTemplate: settings.defaultPdfTemplate,
+    pdfAccentColor: settings.defaultPdfAccentColor,
     rooms: [emptyRoom(1)],
     calculationRules: createDefaultCalculationRules(),
   };
@@ -162,7 +159,7 @@ export default function SaveEstimateDialog({
 }: SaveEstimateDialogProps) {
   const theme = useTheme();
   const fullScreen = useMediaQuery(theme.breakpoints.down('md'));
-  const [draft, setDraft] = useState<EstimateSaveDraft>(() => defaultDraft());
+  const [draft, setDraft] = useState<EstimateSaveDraft>(() => defaultDraft(settings));
   const [ruleOptions, setRuleOptions] = useState<Record<string, RuleCatalogOption[]>>({});
   const [rulesLoading, setRulesLoading] = useState(false);
   const [rulesError, setRulesError] = useState('');
@@ -171,7 +168,7 @@ export default function SaveEstimateDialog({
     if (!open) return;
 
     let cancelled = false;
-    const initialDraft = defaultDraft();
+    const initialDraft = defaultDraft(settings);
     setDraft(initialDraft);
     setRuleOptions({});
     setRulesError('');
@@ -206,7 +203,7 @@ export default function SaveEstimateDialog({
 
     preloadRuleCatalog();
     return () => { cancelled = true; };
-  }, [open]);
+  }, [open, settings]);
 
   const previewEstimate = useMemo(
     () => calculateEstimate({ draft, settings, cartRows }),
@@ -282,6 +279,37 @@ export default function SaveEstimateDialog({
               <MenuItem value="accepted">Принято</MenuItem>
               <MenuItem value="archived">Архив</MenuItem>
             </TextField>
+          </Stack>
+
+          <Stack direction={{ xs: 'column', md: 'row' }} spacing={2}>
+            <TextField
+              select
+              label="Документ"
+              value={draft.documentType || 'preliminary'}
+              onChange={(event) => setDraft((prev) => ({ ...prev, documentType: event.target.value as EstimateDocumentType }))}
+              sx={{ minWidth: { md: 190 } }}
+            >
+              <MenuItem value="preliminary">Предварительный</MenuItem>
+              <MenuItem value="final">Финальный</MenuItem>
+            </TextField>
+            <TextField
+              select
+              label="Шаблон PDF"
+              value={draft.pdfTemplate || settings.defaultPdfTemplate}
+              onChange={(event) => setDraft((prev) => ({ ...prev, pdfTemplate: event.target.value as EstimatePdfTemplate }))}
+              sx={{ minWidth: { md: 190 } }}
+            >
+              <MenuItem value="classic">Classic</MenuItem>
+              <MenuItem value="wave">Wave</MenuItem>
+              <MenuItem value="stripe">Stripe</MenuItem>
+              <MenuItem value="dark">Dark</MenuItem>
+            </TextField>
+            <TextField
+              label="Акцент PDF"
+              value={draft.pdfAccentColor || settings.defaultPdfAccentColor}
+              onChange={(event) => setDraft((prev) => ({ ...prev, pdfAccentColor: event.target.value }))}
+              sx={{ minWidth: { md: 180 } }}
+            />
           </Stack>
 
           <Stack direction={{ xs: 'column', md: 'row' }} spacing={2}>

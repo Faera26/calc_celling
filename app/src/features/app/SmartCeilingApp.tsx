@@ -12,12 +12,13 @@ import AdminPage from '../../screens/AdminPage';
 import CatalogPage from '../../screens/CatalogPage';
 import CatalogManagerPage from '../../screens/CatalogManagerPage';
 import EstimatesPage from '../../screens/EstimatesPage';
+import HomePage from '../../screens/HomePage';
 import LoginPage from '../../screens/LoginPage';
 import PendingAccessPage from '../../screens/PendingAccessPage';
 import ProfilePage from '../../screens/ProfilePage';
 import type { CatalogType } from '../../types';
 
-type SmartCeilingPage = 'catalog' | 'catalog-manager' | 'estimates' | 'profile' | 'admin';
+type SmartCeilingPage = 'home' | 'catalog' | 'catalog-manager' | 'estimates' | 'profile' | 'admin';
 
 interface SmartCeilingAppProps {
   page: SmartCeilingPage;
@@ -83,6 +84,10 @@ export default function SmartCeilingApp({ page, catalogType = 'tovar' }: SmartCe
   }
 
   function renderPage() {
+    if (page === 'home') {
+      return <HomePage auth={auth} settings={settings.settings} />;
+    }
+
     if (page === 'estimates') {
       return <EstimatesPage auth={auth} settings={settings.settings} />;
     }
@@ -131,6 +136,8 @@ export default function SmartCeilingApp({ page, catalogType = 'tovar' }: SmartCe
         onCartOpen={() => cart.setIsCartOpen(true)}
         onSettingsOpen={() => settings.setIsSettingsOpen(true)}
         onRefresh={handleRefresh}
+        searchEnabled={page === 'catalog' || page === 'catalog-manager'}
+        searchPlaceholder={page === 'catalog-manager' ? 'Поиск по админскому каталогу...' : 'Поиск по каталогу...'}
       >
         {renderPage()}
       </AppLayout>

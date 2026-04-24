@@ -62,6 +62,8 @@ export default function CartDrawer({
     const { generatePdf } = await import('../PdfExport');
 
     generatePdf(buildEstimatePdfItemsFromCartRows(cartRows, settings), {
+      template: settings.defaultPdfTemplate,
+      accentColor: settings.defaultPdfAccentColor,
       total: subtotal,
       companyName: settings.companyName,
       managerName: settings.managerName,

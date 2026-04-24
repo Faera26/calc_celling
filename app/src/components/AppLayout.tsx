@@ -4,8 +4,9 @@ import type { ReactNode } from 'react';
 import {
   Avatar,
   Badge,
+  BottomNavigation,
+  BottomNavigationAction,
   Box,
-  Button,
   IconButton,
   InputAdornment,
   Stack,
@@ -16,15 +17,21 @@ import {
 } from '@mui/material';
 import MuiAppBar from '@mui/material/AppBar';
 import {
+  AdminPanelSettings as AdminIcon,
+  ArrowBackIosNew as ArrowBackIcon,
+  Description as EstimatesIcon,
+  HomeRounded as HomeIcon,
   Logout as LogoutIcon,
+  Person as ProfileIcon,
   Refresh as RefreshIcon,
   Search as SearchIcon,
   Settings as SettingsIcon,
   ShoppingCart as CartIcon,
+  Storefront as CatalogIcon,
 } from '@mui/icons-material';
 import Link from 'next/link';
-import { usePathname } from 'next/navigation';
-import { APP_NAV_ITEMS } from '../features/app/navigation';
+import { usePathname, useRouter } from 'next/navigation';
+import { APP_NAV_ITEMS, APP_ROUTES } from '../features/app/navigation';
 import type { AuthState, CompanySettings } from '../types';
 
 interface AppLayoutProps {
@@ -36,6 +43,8 @@ interface AppLayoutProps {
   onCartOpen: () => void;
   onSettingsOpen: () => void;
   onRefresh: () => void;
+  searchEnabled?: boolean;
+  searchPlaceholder?: string;
   children?: ReactNode;
 }
 
@@ -48,28 +57,43 @@ export default function AppLayout({
   onCartOpen,
   onSettingsOpen,
   onRefresh,
+  searchEnabled = false,
+  searchPlaceholder = 'Поиск...',
   children,
 }: AppLayoutProps) {
+  const router = useRouter();
   const pathname = usePathname();
-  const currentPath = pathname ?? '/';
+  const currentPath = pathname ?? APP_ROUTES.home;
   const navLinks = APP_NAV_ITEMS.filter((link) => !link.adminOnly || auth.isAdmin);
+  const isHomePage = currentPath === APP_ROUTES.home;
 
-  // Один массив маршрутов используется и в верхнем меню, и в боковом drawer.
-  // Так новичку проще менять навигацию: достаточно поправить один файл.
   function isActiveLink(href: string) {
-    if (href === '/catalog' && currentPath === '/') {
-      return true;
+    if (href === APP_ROUTES.home) {
+      return currentPath === APP_ROUTES.home;
     }
 
-    if (href === '/') {
-      return currentPath === '/';
+    if (href === APP_ROUTES.catalog) {
+      return currentPath.startsWith(APP_ROUTES.catalog);
     }
 
     return currentPath.startsWith(href);
   }
 
+  function resolveNavValue() {
+    const activeLink = navLinks.find((link) => isActiveLink(link.href));
+    return activeLink?.href || APP_ROUTES.home;
+  }
+
+  function navIconOf(href: string) {
+    if (href === APP_ROUTES.home) return <HomeIcon />;
+    if (href === APP_ROUTES.catalog) return <CatalogIcon />;
+    if (href === APP_ROUTES.estimates) return <EstimatesIcon />;
+    if (href === APP_ROUTES.profile) return <ProfileIcon />;
+    return <AdminIcon />;
+  }
+
   return (
-    <Box sx={{ minHeight: '100vh', backgroundColor: '#FBFBFD' }}>
+    <Box sx={{ minHeight: '100vh', backgroundColor: '#FBFBFD', pb: { xs: '92px', md: 0 } }}>
       <MuiAppBar
         position="sticky"
         elevation={0}
@@ -80,15 +104,39 @@ export default function AppLayout({
           zIndex: (theme) => theme.zIndex.drawer + 1,
         }}
       >
-        <Toolbar sx={{ gap: { xs: 0.5, sm: 2 }, minHeight: { xs: 56, sm: 72 }, px: { xs: 1, sm: 4 } }}>
-          <Stack direction="row" sx={{ alignItems: 'center', gap: { xs: 1, sm: 1.5 }, minWidth: 0, flexShrink: 1 }}>
+        <Toolbar sx={{ gap: { xs: 0.75, sm: 2 }, minHeight: { xs: 64, sm: 76 }, px: { xs: 1.25, sm: 3 } }}>
+          {!isHomePage && (
+            <Tooltip title="Назад">
+              <IconButton
+                onClick={() => {
+                  if (window.history.length > 1) {
+                    router.back();
+                    return;
+                  }
+
+                  router.push(APP_ROUTES.home);
+                }}
+                size="small"
+                sx={{ color: 'var(--primary)', flexShrink: 0 }}
+              >
+                <ArrowBackIcon fontSize="small" />
+              </IconButton>
+            </Tooltip>
+          )}
+
+          <Stack
+            component={Link}
+            href={APP_ROUTES.home}
+            direction="row"
+            sx={{ alignItems: 'center', gap: { xs: 1, sm: 1.5 }, minWidth: 0, flexShrink: 1 }}
+          >
             <Avatar
               src={settings.avatarDataUrl || undefined}
               sx={{
-                width: { xs: 28, sm: 40 },
-                height: { xs: 28, sm: 40 },
+                width: { xs: 32, sm: 42 },
+                height: { xs: 32, sm: 42 },
                 bgcolor: 'var(--primary)',
-                fontSize: { xs: '0.8rem', sm: '1rem' },
+                fontSize: { xs: '0.9rem', sm: '1rem' },
                 fontWeight: 700,
                 flexShrink: 0,
               }}
@@ -100,9 +148,9 @@ export default function AppLayout({
                 variant="subtitle1"
                 className="headline-editorial"
                 sx={{
-                  lineHeight: 1.2,
-                  fontSize: { xs: '0.85rem', sm: '1.1rem' },
-                  fontWeight: 700,
+                  lineHeight: 1.1,
+                  fontSize: { xs: '0.95rem', sm: '1.1rem' },
+                  fontWeight: 800,
                   color: 'var(--primary)',
                   overflow: 'hidden',
                   textOverflow: 'ellipsis',
@@ -111,54 +159,34 @@ export default function AppLayout({
               >
                 {settings.companyName}
               </Typography>
+              <Typography
+                variant="caption"
+                sx={{
+                  display: { xs: 'none', sm: 'block' },
+                  color: 'var(--secondary)',
+                }}
+              >
+                {isHomePage ? 'Главный экран' : 'Нажми, чтобы перейти на главную'}
+              </Typography>
             </Box>
           </Stack>
 
-          <Box sx={{ display: { xs: 'none', lg: 'flex' }, gap: 0.5, ml: 3 }}>
-            {navLinks.map((link) => {
-              const isActive = isActiveLink(link.href);
-
-              return (
-                <Button
-                  key={link.href}
-                  component={Link}
-                  href={link.href}
-                  sx={{
-                    textTransform: 'none',
-                    fontWeight: 500,
-                    fontSize: '14px',
-                    px: 2,
-                    py: 0.5,
-                    borderRadius: '8px',
-                    color: isActive ? 'var(--primary)' : 'var(--secondary)',
-                    bgcolor: isActive ? 'rgba(0,0,0,0.04)' : 'transparent',
-                    '&:hover': {
-                      bgcolor: 'rgba(0,0,0,0.02)',
-                    },
-                  }}
-                >
-                  {link.label}
-                </Button>
-              );
-            })}
-          </Box>
-
           <Box sx={{ flexGrow: 1 }} />
 
-          <Stack direction="row" spacing={{ xs: 0.5, sm: 1 }} sx={{ alignItems: 'center' }}>
+          {searchEnabled && (
             <TextField
               size="small"
-              placeholder="Поиск..."
+              placeholder={searchPlaceholder}
               value={search}
               onChange={(event) => onSearchChange(event.target.value)}
               sx={{
                 display: { xs: 'none', md: 'block' },
-                width: { md: 180, lg: 240 },
+                width: { md: 220, lg: 300 },
                 mr: 1,
                 '& .MuiOutlinedInput-root': {
-                  borderRadius: '10px',
+                  borderRadius: '14px',
                   bgcolor: 'rgba(0,0,0,0.04)',
-                  height: '36px',
+                  height: '40px',
                   fontSize: '14px',
                   '& fieldset': { border: 'none' },
                 },
@@ -173,7 +201,9 @@ export default function AppLayout({
                 },
               }}
             />
+          )}
 
+          <Stack direction="row" spacing={{ xs: 0.25, sm: 0.75 }} sx={{ alignItems: 'center' }}>
             <Tooltip title="Обновить">
               <IconButton onClick={onRefresh} size="small" sx={{ color: 'var(--primary)' }}>
                 <RefreshIcon fontSize="small" />
@@ -203,6 +233,46 @@ export default function AppLayout({
 
       <Box component="main">
         {children}
+      </Box>
+
+      <Box
+        sx={{
+          display: { xs: 'block', md: 'none' },
+          position: 'fixed',
+          left: 12,
+          right: 12,
+          bottom: 'calc(var(--safe-area-bottom) + 12px)',
+          zIndex: (theme) => theme.zIndex.appBar,
+        }}
+      >
+        <BottomNavigation
+          showLabels
+          value={resolveNavValue()}
+          sx={{
+            height: 72,
+            borderRadius: '24px',
+            boxShadow: '0 18px 48px rgba(15, 23, 42, 0.12)',
+            bgcolor: 'rgba(255,255,255,0.94)',
+            backdropFilter: 'blur(14px)',
+          }}
+        >
+          {navLinks.map((link) => (
+            <BottomNavigationAction
+              key={link.href}
+              component={Link}
+              href={link.href}
+              value={link.href}
+              label={link.label}
+              icon={navIconOf(link.href)}
+              sx={{
+                minWidth: 0,
+                '&.Mui-selected': {
+                  color: '#0B5CAD',
+                },
+              }}
+            />
+          ))}
+        </BottomNavigation>
       </Box>
     </Box>
   );

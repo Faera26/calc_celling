@@ -124,6 +124,9 @@ describe('calculationEngine', () => {
         objectAddress: '',
         clientComment: '',
         status: 'draft',
+        documentType: 'final',
+        pdfTemplate: 'dark',
+        pdfAccentColor: '#111111',
         rooms: [{
           id: 'room-1',
           name: 'Спальня',
@@ -206,6 +209,9 @@ describe('calculationEngine', () => {
         objectAddress: '',
         clientComment: '',
         status: 'draft',
+        documentType: 'final',
+        pdfTemplate: 'dark',
+        pdfAccentColor: '#111111',
         rooms: [{
           id: 'room-1',
           name: 'Комната 1',
@@ -330,6 +336,9 @@ describe('calculationEngine', () => {
         title: 'Объект 1',
         clientName: 'Клиент',
         clientPhone: '+7',
+        documentType: 'final',
+        pdfTemplate: 'dark',
+        pdfAccentColor: '#111111',
         clientEmail: '',
         objectAddress: '',
         clientComment: '',
@@ -360,6 +369,11 @@ describe('calculationEngine', () => {
       subtotal: 1800,
       total: 1800,
       status: 'draft',
+    });
+    expect(recordPayloads.extendedEstimatePayload).toMatchObject({
+      document_type: 'final',
+      pdf_template: 'dark',
+      pdf_accent_color: '#111111',
     });
     expect(rows.roomRows).toHaveLength(1);
     expect(rows.basePositionRows).toEqual([{

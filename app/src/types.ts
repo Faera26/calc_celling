@@ -53,6 +53,8 @@ export interface CompanySettings {
   avatarDataUrl: string;
   marginPercent: number;
   discountPercent: number;
+  defaultPdfTemplate: EstimatePdfTemplate;
+  defaultPdfAccentColor: string;
   pdfNote: string;
 }
 
@@ -157,6 +159,9 @@ export interface EstimateSaveDraft {
   objectAddress: string;
   clientComment: string;
   status: EstimateStatus;
+  documentType?: EstimateDocumentType;
+  pdfTemplate?: EstimatePdfTemplate;
+  pdfAccentColor?: string;
   rooms: EstimateRoomDraft[];
   calculationRules?: EstimateCalculationRule[];
 }

@@ -12,6 +12,7 @@ interface CatalogGridBaseProps {
   loading: boolean;
   onViewNode: (item: CatalogItem) => void;
   onOpenConstructor: (item: CatalogItem) => void;
+  onOpenDetails: (item: CatalogItem) => void;
 }
 
 interface CatalogGridBrowseProps extends CatalogGridBaseProps {
@@ -40,6 +41,7 @@ export default function CatalogGrid(props: CatalogGridProps) {
     loading,
     onViewNode,
     onOpenConstructor,
+    onOpenDetails,
   } = props;
 
   if (loading) {
@@ -84,6 +86,7 @@ export default function CatalogGrid(props: CatalogGridProps) {
               onRemoveFromCart={() => {}}
               onViewNode={() => onViewNode(item)}
               onOpenConstructor={() => onOpenConstructor(item)}
+              onOpenDetails={() => onOpenDetails(item)}
               onEdit={editItem ? () => editItem(item) : undefined}
               onDelete={deleteItem ? () => deleteItem(item) : undefined}
             />
@@ -114,6 +117,7 @@ export default function CatalogGrid(props: CatalogGridProps) {
             onRemoveFromCart={() => props.onRemoveFromCart(cardKey)}
             onViewNode={() => onViewNode(item)}
             onOpenConstructor={() => onOpenConstructor(item)}
+            onOpenDetails={() => onOpenDetails(item)}
           />
         );
       })}

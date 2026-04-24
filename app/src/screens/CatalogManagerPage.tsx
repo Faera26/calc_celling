@@ -27,13 +27,14 @@ import { useCatalog, openNodeDetails } from '../hooks/useCatalog';
 import { useConstructor } from '../hooks/useConstructor';
 import CatalogGrid from '../components/CatalogGrid';
 import AddItemDialog from '../components/AddItemDialog';
+import CatalogItemDetailsDialog from '../components/CatalogItemDetailsDialog';
 import CatalogHierarchyPicker from '../components/CatalogHierarchyPicker';
 import ConfirmDialog from '../components/ConfirmDialog';
 import ConstructorDialog from '../components/ConstructorDialog';
 import EmptyState from '../components/EmptyState';
 import NodeDetailsDialog from '../components/NodeDetailsDialog';
 import PaginationControls from '../components/PaginationControls';
-import { formatError, titleOf } from '../utils';
+import { formatError, readImageAsDataUrl, titleOf } from '../utils';
 import {
   itemFormFromCatalogItem,
   validateCatalogItemForm,
@@ -101,6 +102,7 @@ export default function CatalogManagerPage({
   });
 
   const [selectedNode, setSelectedNode] = useState<UzelItem | null>(null);
+  const [selectedItem, setSelectedItem] = useState<CatalogItem | null>(null);
   const [nodeDetailsLoading, setNodeDetailsLoading] = useState(false);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [dialogMode, setDialogMode] = useState<'create' | 'edit'>('create');
@@ -160,6 +162,10 @@ export default function CatalogManagerPage({
     void constructor.openConstructor(node, catalog.loadNodeComponents);
   }
 
+  function handleOpenDetails(item: CatalogItem) {
+    setSelectedItem(item);
+  }
+
   function openCreateDialog() {
     setDialogMode('create');
     setEditingItem(null);
@@ -208,6 +214,17 @@ export default function CatalogManagerPage({
       setSaveError(formatError(error));
     } finally {
       setSavingItem(false);
+    }
+  }
+
+  async function handleItemImageUpload(file?: File) {
+    if (!file) return;
+
+    try {
+      const image = await readImageAsDataUrl(file);
+      setItemForm((prev) => ({ ...prev, image }));
+    } catch (error) {
+      setSaveError(formatError(error));
     }
   }
 
@@ -524,6 +541,7 @@ export default function CatalogManagerPage({
                   deletingItemId={deletingItemId}
                   onViewNode={handleViewNode}
                   onOpenConstructor={handleOpenConstructor}
+                  onOpenDetails={handleOpenDetails}
                   onEditItem={openEditDialog}
                   onDeleteItem={setDeleteTarget}
                 />
@@ -566,6 +584,26 @@ export default function CatalogManagerPage({
         }}
       />
 
+      <CatalogItemDetailsDialog
+        open={Boolean(selectedItem)}
+        item={selectedItem}
+        activeType={catalog.activeType}
+        settings={settings}
+        cachedComponents={selectedItem ? catalog.nodeComponents[selectedItem.id] || [] : []}
+        isAdmin={auth.isAdmin}
+        onClose={() => setSelectedItem(null)}
+        onEdit={selectedItem ? () => {
+          openEditDialog(selectedItem);
+          setSelectedItem(null);
+        } : undefined}
+        onOpenConstructor={selectedItem && catalog.activeType === 'uzel'
+          ? () => {
+            handleOpenConstructor(selectedItem);
+            setSelectedItem(null);
+          }
+          : undefined}
+      />
+
       <ConstructorDialog
         state={constructor.constructorState}
         loading={constructor.constructorLoading}
@@ -593,6 +631,7 @@ export default function CatalogManagerPage({
         onClose={closeDialog}
         onSave={handleSaveItem}
         onFormChange={(patch) => setItemForm((prev) => ({ ...prev, ...patch }))}
+        onImageUpload={handleItemImageUpload}
       />
 
       <ConfirmDialog

@@ -234,3 +234,56 @@ export function readSettings(): CompanySettings {
     return DEFAULT_SETTINGS;
   }
 }
+
+interface ImageReadOptions {
+  maxWidth?: number;
+  maxHeight?: number;
+  quality?: number;
+}
+
+export async function readImageAsDataUrl(
+  file: File,
+  options: ImageReadOptions = {}
+): Promise<string> {
+  const {
+    maxWidth = 1400,
+    maxHeight = 1400,
+    quality = 0.82,
+  } = options;
+
+  const rawDataUrl = await new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error('Не удалось прочитать файл изображения.'));
+    reader.onload = () => resolve(String(reader.result || ''));
+    reader.readAsDataURL(file);
+  });
+
+  if (typeof window === 'undefined') {
+    return rawDataUrl;
+  }
+
+  const image = await new Promise<HTMLImageElement>((resolve, reject) => {
+    const previewImage = new Image();
+    previewImage.onload = () => resolve(previewImage);
+    previewImage.onerror = () => reject(new Error('Не удалось обработать изображение.'));
+    previewImage.src = rawDataUrl;
+  });
+
+  const widthRatio = maxWidth / image.width;
+  const heightRatio = maxHeight / image.height;
+  const ratio = Math.min(widthRatio, heightRatio, 1);
+  const targetWidth = Math.max(1, Math.round(image.width * ratio));
+  const targetHeight = Math.max(1, Math.round(image.height * ratio));
+
+  const canvas = document.createElement('canvas');
+  canvas.width = targetWidth;
+  canvas.height = targetHeight;
+
+  const context = canvas.getContext('2d');
+  if (!context) {
+    return rawDataUrl;
+  }
+
+  context.drawImage(image, 0, 0, targetWidth, targetHeight);
+  return canvas.toDataURL('image/jpeg', quality);
+}

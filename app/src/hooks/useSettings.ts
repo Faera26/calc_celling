@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import type { CompanySettings } from '../types';
 import { SETTINGS_KEY } from '../constants';
-import { readSettings, withTimeout } from '../utils';
+import { readImageAsDataUrl, readSettings, withTimeout } from '../utils';
 import { supabase } from '../supabaseClient';
 import { restSelect } from '../supabaseRest';
 
@@ -47,6 +47,8 @@ function mapRowToSettings(row: CompanySettingsRow | null, cached: CompanySetting
     avatarDataUrl: cached.avatarDataUrl || row.avatar_url || '',
     marginPercent: toNumber(row.default_margin_percent),
     discountPercent: toNumber(row.default_discount_percent),
+    defaultPdfTemplate: cached.defaultPdfTemplate,
+    defaultPdfAccentColor: cached.defaultPdfAccentColor,
     pdfNote: row.pdf_note || '',
   };
 }
@@ -166,14 +168,20 @@ export function useSettings({ userId, isAdmin, profileReady }: UseSettingsOption
     setSettings((prev) => ({ ...prev, ...patch }));
   }
 
-  function handleAvatar(file?: File) {
+  async function handleAvatar(file?: File) {
     if (!file) return;
 
-    const reader = new FileReader();
-    reader.onload = () => {
-      setSettings((prev) => ({ ...prev, avatarDataUrl: String(reader.result || '') }));
-    };
-    reader.readAsDataURL(file);
+    try {
+      const avatarDataUrl = await readImageAsDataUrl(file, {
+        maxWidth: 720,
+        maxHeight: 720,
+        quality: 0.85,
+      });
+
+      setSettings((prev) => ({ ...prev, avatarDataUrl }));
+    } catch (error) {
+      setSyncError(error instanceof Error ? error.message : String(error));
+    }
   }
 
   return {
