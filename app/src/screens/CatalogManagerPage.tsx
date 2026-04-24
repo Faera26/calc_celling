@@ -617,6 +617,7 @@ export default function CatalogManagerPage({
         onSave={constructor.saveConstructor}
         onAddComponent={constructor.addComponent}
         onRemoveComponent={constructor.removeComponent}
+        onUpdateComponent={constructor.updateComponent}
         onDraftChange={constructor.setComponentDraft}
         onSearchChange={constructor.setComponentSearch}
       />

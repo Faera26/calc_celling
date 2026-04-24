@@ -30,8 +30,17 @@ import AddItemDialog from '../components/AddItemDialog';
 import CatalogItemDetailsDialog from '../components/CatalogItemDetailsDialog';
 import CatalogTypeSwitcher from '../components/CatalogTypeSwitcher';
 import CatalogHierarchyPicker from '../components/CatalogHierarchyPicker';
-import { supabase } from '../supabaseClient';
-import { formatError, readImageAsDataUrl, titleOf, withTimeout } from '../utils';
+import ConfirmDialog from '../components/ConfirmDialog';
+import {
+  deleteCatalogItemRecord,
+  saveCatalogItemRecord,
+} from '../features/catalog/catalogManagerService';
+import {
+  itemFormFromCatalogItem,
+  validateCatalogItemForm,
+  type CatalogDialogMode,
+} from '../features/catalog/catalogCrud';
+import { formatError, readImageAsDataUrl, titleOf } from '../utils';
 
 interface CatalogPageProps {
   auth: AuthState;
@@ -76,6 +85,10 @@ export default function CatalogPage({
   const [selectedItem, setSelectedItem] = useState<CatalogItem | null>(null);
   const [nodeDetailsLoading, setNodeDetailsLoading] = useState(false);
   const [itemDialogOpen, setItemDialogOpen] = useState(false);
+  const [itemDialogMode, setItemDialogMode] = useState<CatalogDialogMode>('create');
+  const [editingItem, setEditingItem] = useState<CatalogItem | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<{ type: CatalogType; item: CatalogItem } | null>(null);
+  const [deletingItemId, setDeletingItemId] = useState('');
   const [itemForm, setItemForm] = useState<ItemForm>(EMPTY_ITEM_FORM);
   const [savingItem, setSavingItem] = useState(false);
   const [saveError, setSaveError] = useState('');
@@ -129,55 +142,84 @@ export default function CatalogPage({
     }
   }
 
+  function openCreateItemDialog() {
+    setItemDialogMode('create');
+    setEditingItem(null);
+    setItemForm(EMPTY_ITEM_FORM);
+    setSaveError('');
+    setItemDialogOpen(true);
+  }
+
+  function openEditItemDialog(item: CatalogItem) {
+    setSelectedItem(null);
+    setItemDialogMode('edit');
+    setEditingItem(item);
+    setItemForm(itemFormFromCatalogItem(item));
+    setSaveError('');
+    setItemDialogOpen(true);
+  }
+
+  function closeItemDialog() {
+    if (savingItem) return;
+
+    resetItemDialog();
+  }
+
+  function resetItemDialog() {
+    setItemDialogOpen(false);
+    setItemDialogMode('create');
+    setEditingItem(null);
+    setItemForm(EMPTY_ITEM_FORM);
+    setSaveError('');
+  }
+
   async function handleSaveItem() {
     setSavingItem(true);
     setSaveError('');
 
-    const trimmedCategory = itemForm.category.trim() || 'Без категории';
-    const trimmedSubcategory = itemForm.subcategory.trim() || 'Без подкатегории';
-
-    const newItem = {
-      id: itemForm.id.trim() || crypto.randomUUID(),
-      name: itemForm.name.trim(),
-      category: trimmedCategory,
-      subcategory: trimmedSubcategory,
-      price: Number(itemForm.price || 0),
-      unit: itemForm.unit.trim(),
-      image: itemForm.image.trim() || null,
-      description: itemForm.description.trim() || null,
-    };
-
-    if (!newItem.name) {
-      setSaveError('Укажи название позиции.');
+    const validationError = validateCatalogItemForm(itemForm);
+    if (validationError) {
+      setSaveError(validationError);
       setSavingItem(false);
       return;
     }
 
     try {
-      const table = catalog.activeType === 'tovar' ? 'tovary' : catalog.activeType === 'usluga' ? 'uslugi' : 'uzly';
+      await saveCatalogItemRecord({
+        type: catalog.activeType,
+        mode: itemDialogMode,
+        form: itemForm,
+        existingItem: editingItem,
+      });
 
-      const { error } = await withTimeout(
-        supabase.from(table).insert([
-          catalog.activeType === 'uzel'
-            ? { ...newItem, stats: { positions: 0, products: 0, services: 0, source: 'manual_created' } }
-            : { ...newItem, source: 'manual' },
-        ]),
-        'Сохранение позиции'
-      );
-
-      if (error) {
-        throw error;
-      }
-
-      await constructor.upsertCategory(catalog.activeType, trimmedCategory, trimmedSubcategory);
-
-      setItemDialogOpen(false);
-      setItemForm(EMPTY_ITEM_FORM);
+      resetItemDialog();
       catalog.refresh();
     } catch (error) {
       setSaveError(formatError(error));
     } finally {
       setSavingItem(false);
+    }
+  }
+
+  function openDeleteItemDialog(item: CatalogItem) {
+    setSelectedItem(null);
+    setSaveError('');
+    setDeleteTarget({ type: catalog.activeType, item });
+  }
+
+  async function handleDeleteItem() {
+    if (!deleteTarget) return;
+
+    setDeletingItemId(deleteTarget.item.id);
+
+    try {
+      await deleteCatalogItemRecord(deleteTarget);
+      setDeleteTarget(null);
+      catalog.refresh();
+    } catch (error) {
+      catalog.setLoadError(`Не удалось удалить позицию: ${formatError(error)}`);
+    } finally {
+      setDeletingItemId('');
     }
   }
 
@@ -222,7 +264,7 @@ export default function CatalogPage({
         </Box>
 
         {auth.isAdmin && (
-          <Button variant="contained" startIcon={<AddIcon />} onClick={() => setItemDialogOpen(true)}>
+          <Button variant="contained" startIcon={<AddIcon />} onClick={openCreateItemDialog}>
             Добавить позицию
           </Button>
         )}
@@ -288,6 +330,9 @@ export default function CatalogPage({
           onViewNode={handleViewNode}
           onOpenConstructor={handleOpenConstructor}
           onOpenDetails={handleOpenDetails}
+          deletingItemId={deletingItemId}
+          onEditItem={auth.isAdmin ? openEditItemDialog : undefined}
+          onDeleteItem={auth.isAdmin ? openDeleteItemDialog : undefined}
         />
       )}
 
@@ -349,6 +394,7 @@ export default function CatalogPage({
             setSelectedItem(null);
           }
           : undefined}
+        onEdit={selectedItem ? () => openEditItemDialog(selectedItem) : undefined}
       />
 
       <ConstructorDialog
@@ -364,6 +410,7 @@ export default function CatalogPage({
         onSave={constructor.saveConstructor}
         onAddComponent={constructor.addComponent}
         onRemoveComponent={constructor.removeComponent}
+        onUpdateComponent={constructor.updateComponent}
         onDraftChange={constructor.setComponentDraft}
         onSearchChange={constructor.setComponentSearch}
       />
@@ -371,13 +418,28 @@ export default function CatalogPage({
       <AddItemDialog
         open={itemDialogOpen}
         activeType={catalog.activeType}
+        mode={itemDialogMode}
         form={itemForm}
         saving={savingItem}
         error={saveError}
-        onClose={() => setItemDialogOpen(false)}
+        onClose={closeItemDialog}
         onSave={handleSaveItem}
         onFormChange={(patch) => setItemForm((previousValue) => ({ ...previousValue, ...patch }))}
         onImageUpload={handleItemImageUpload}
+      />
+
+      <ConfirmDialog
+        open={Boolean(deleteTarget)}
+        title="Удалить позицию из каталога?"
+        description={deleteTarget ? `${deleteTarget.item.name} будет удалена из текущего каталога. Старые сметы не изменятся, потому что в них уже хранится snapshot.` : undefined}
+        confirmLabel="Удалить"
+        confirmColor="error"
+        tone="danger"
+        loading={Boolean(deletingItemId)}
+        onClose={() => {
+          if (!deletingItemId) setDeleteTarget(null);
+        }}
+        onConfirm={() => void handleDeleteItem()}
       />
     </Box>
   );

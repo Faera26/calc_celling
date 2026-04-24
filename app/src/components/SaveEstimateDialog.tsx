@@ -39,6 +39,7 @@ import {
 } from '../features/estimates/calculationEngine';
 import { supabase } from '../supabaseClient';
 import { cleanSearch, money } from '../utils';
+import PdfColorPalette from './PdfColorPalette';
 
 interface RuleCatalogOption {
   id: string;
@@ -304,13 +305,13 @@ export default function SaveEstimateDialog({
               <MenuItem value="stripe">Stripe</MenuItem>
               <MenuItem value="dark">Dark</MenuItem>
             </TextField>
-            <TextField
-              label="Акцент PDF"
-              value={draft.pdfAccentColor || settings.defaultPdfAccentColor}
-              onChange={(event) => setDraft((prev) => ({ ...prev, pdfAccentColor: event.target.value }))}
-              sx={{ minWidth: { md: 180 } }}
-            />
           </Stack>
+
+          <PdfColorPalette
+            value={draft.pdfAccentColor || settings.defaultPdfAccentColor}
+            onChange={(pdfAccentColor) => setDraft((prev) => ({ ...prev, pdfAccentColor }))}
+            label="Акцент PDF"
+          />
 
           <Stack direction={{ xs: 'column', md: 'row' }} spacing={2}>
             <TextField

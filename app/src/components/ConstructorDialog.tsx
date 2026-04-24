@@ -10,14 +10,13 @@ import {
   DialogActions,
   DialogContent,
   DialogTitle,
-  IconButton,
   MenuItem,
   Stack,
   TextField,
   Typography,
 } from '@mui/material';
-import { Remove as RemoveIcon } from '@mui/icons-material';
-import type { ComponentDraft, ComponentType, ConstructorState, CatalogItem } from '../types';
+import { DeleteOutlined as DeleteIcon } from '@mui/icons-material';
+import type { ComponentDraft, ComponentType, ConstructorState, CatalogItem, UzelComponent } from '../types';
 import { money } from '../utils';
 
 interface ConstructorDialogProps {
@@ -33,6 +32,10 @@ interface ConstructorDialogProps {
   onSave: () => void;
   onAddComponent: () => void;
   onRemoveComponent: (index: number) => void;
+  onUpdateComponent: (
+    index: number,
+    patch: Partial<Pick<UzelComponent, 'qty' | 'price' | 'unit' | 'comment'>>
+  ) => void;
   onDraftChange: (draft: ComponentDraft) => void;
   onSearchChange: (search: string) => void;
 }
@@ -50,6 +53,7 @@ export default function ConstructorDialog({
   onSave,
   onAddComponent,
   onRemoveComponent,
+  onUpdateComponent,
   onDraftChange,
   onSearchChange,
 }: ConstructorDialogProps) {
@@ -151,13 +155,52 @@ export default function ConstructorDialog({
                             ID {row.item_id} • {row.category || 'Без категории'} / {row.subcategory || 'Без подкатегории'}
                           </Typography>
                         </Box>
-                        <Stack direction="row" spacing={2} sx={{ alignItems: 'center' }}>
-                          <Typography sx={{ minWidth: 190, textAlign: 'right' }}>
-                            {row.qty} {row.unit} × {money(row.price)} = {money(row.total)}
+                        <Stack
+                          direction={{ xs: 'column', sm: 'row' }}
+                          spacing={1.25}
+                          sx={{ alignItems: { sm: 'center' }, minWidth: { md: 470 } }}
+                        >
+                          <TextField
+                            size="small"
+                            label="Кол-во"
+                            type="number"
+                            value={row.qty}
+                            disabled={saving}
+                            onChange={(event) => onUpdateComponent(index, { qty: Number(event.target.value) })}
+                            slotProps={{ htmlInput: { min: 0, step: 0.1 } }}
+                            sx={{ width: { xs: '100%', sm: 105 } }}
+                          />
+                          <TextField
+                            size="small"
+                            label="Цена"
+                            type="number"
+                            value={row.price}
+                            disabled={saving}
+                            onChange={(event) => onUpdateComponent(index, { price: Number(event.target.value) })}
+                            slotProps={{ htmlInput: { min: 0, step: 1 } }}
+                            sx={{ width: { xs: '100%', sm: 130 } }}
+                          />
+                          <TextField
+                            size="small"
+                            label="Ед."
+                            value={row.unit}
+                            disabled={saving}
+                            onChange={(event) => onUpdateComponent(index, { unit: event.target.value })}
+                            sx={{ width: { xs: '100%', sm: 90 } }}
+                          />
+                          <Typography sx={{ minWidth: { sm: 110 }, textAlign: { sm: 'right' }, fontWeight: 800 }}>
+                            {money(row.total)}
                           </Typography>
-                          <IconButton color="error" onClick={() => onRemoveComponent(index)}>
-                            <RemoveIcon />
-                          </IconButton>
+                          <Button
+                            variant="outlined"
+                            color="error"
+                            startIcon={<DeleteIcon />}
+                            disabled={saving}
+                            onClick={() => onRemoveComponent(index)}
+                            sx={{ borderRadius: '14px', textTransform: 'none' }}
+                          >
+                            Удалить
+                          </Button>
                         </Stack>
                       </Stack>
                     </CardContent>

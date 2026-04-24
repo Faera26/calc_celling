@@ -58,6 +58,7 @@ export default function CatalogCard({
   const cartKey = keyOf(activeType, item.id);
   const manageMode = mode === 'manage';
   const hasManagementActions = Boolean(onEdit || onDelete);
+  const showManagementActions = isAdmin && hasManagementActions;
 
   return (
     <Card
@@ -174,7 +175,7 @@ export default function CatalogCard({
             </Button>
           )}
 
-          {manageMode && hasManagementActions && (
+          {showManagementActions && (
             <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1}>
               {onEdit && (
                 <Button fullWidth variant="contained" onClick={onEdit} sx={{ borderRadius: '14px', py: 1.05 }}>

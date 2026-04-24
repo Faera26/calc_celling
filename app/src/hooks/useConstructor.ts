@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { supabase } from '../supabaseClient';
-import { restSelect } from '../supabaseRest';
+import { restDelete, restInsert, restSelect, restUpdate } from '../supabaseRest';
 import type {
   CatalogItem,
   CatalogType,
@@ -175,6 +175,32 @@ export function useConstructor({
     });
   }
 
+  function updateComponent(
+    index: number,
+    patch: Partial<Pick<UzelComponent, 'qty' | 'price' | 'unit' | 'comment'>>
+  ) {
+    setConstructorState(prev => {
+      if (!prev) return prev;
+
+      const rows = prev.rows.map((row, rowIndex) => {
+        if (rowIndex !== index) return row;
+
+        const nextQty = patch.qty !== undefined ? Math.max(0, Number(patch.qty || 0)) : row.qty;
+        const nextPrice = patch.price !== undefined ? Math.max(0, Number(patch.price || 0)) : row.price;
+
+        return {
+          ...row,
+          ...patch,
+          qty: Number.isFinite(nextQty) ? nextQty : 0,
+          price: Number.isFinite(nextPrice) ? nextPrice : 0,
+          total: (Number.isFinite(nextQty) ? nextQty : 0) * (Number.isFinite(nextPrice) ? nextPrice : 0),
+        };
+      });
+
+      return { ...prev, rows };
+    });
+  }
+
   async function saveConstructor() {
     if (!constructorState || !isAdmin) return;
 
@@ -211,32 +237,27 @@ export function useConstructor({
     };
 
     try {
-      const { error: nodeError } = await withTimeout(
-        supabase
-          .from('uzly')
-          .update(nodeUpdate)
-          .eq('id', constructorState.node.id),
+      await withTimeout(
+        restUpdate('uzly', nodeUpdate, {
+          filters: { id: constructorState.node.id },
+          returning: 'minimal',
+        }),
         'Обновление узла'
       );
-      if (nodeError) throw nodeError;
 
-      const { error: deleteError } = await withTimeout(
-        supabase
-          .from('komplektaciya_uzlov')
-          .delete()
-          .eq('uzel_id', constructorState.node.id),
+      await withTimeout(
+        restDelete('komplektaciya_uzlov', {
+          filters: { uzel_id: constructorState.node.id },
+          returning: 'minimal',
+        }),
         'Очистка старой комплектации'
       );
-      if (deleteError) throw deleteError;
 
       if (normalizedRows.length > 0) {
-        const { error: insertError } = await withTimeout(
-          supabase
-            .from('komplektaciya_uzlov')
-            .insert(normalizedRows),
+        await withTimeout(
+          restInsert('komplektaciya_uzlov', normalizedRows, { returning: 'minimal' }),
           'Сохранение комплектации'
         );
-        if (insertError) throw insertError;
       }
     } catch (error) {
       setSavingConstructor(false);
@@ -301,6 +322,7 @@ export function useConstructor({
     closeConstructor,
     addComponent,
     removeComponent,
+    updateComponent,
     saveConstructor,
     upsertCategory,
   };

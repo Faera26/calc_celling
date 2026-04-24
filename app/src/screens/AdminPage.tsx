@@ -137,7 +137,7 @@ export default function AdminPage({ auth }: AdminPageProps) {
                 Админка управления доступом и каталогом.
               </Typography>
               <Typography sx={{ mt: 1.5, color: 'rgba(8,43,76,0.68)', lineHeight: 1.7 }}>
-                Здесь ты подтверждаешь пользователей, раздаёшь роли и переходишь в отдельную premium-панель каталога, где можно редактировать товары, услуги и узлы.
+                Здесь ты подтверждаешь пользователей и раздаёшь роли. Каталог теперь редактируется прямо в обычной кассе: открываешь карточку и меняешь товар без отдельной панели.
               </Typography>
             </Box>
 
@@ -145,7 +145,7 @@ export default function AdminPage({ auth }: AdminPageProps) {
               <Button
                 variant="contained"
                 component={Link}
-                href={APP_ROUTES.catalogManager}
+                href={APP_ROUTES.catalog}
                 endIcon={<ArrowOutwardIcon />}
                 sx={{ borderRadius: '999px', px: 2.5, py: 1.15, textTransform: 'none' }}
               >

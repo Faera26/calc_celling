@@ -58,6 +58,7 @@ import {
   resolveEstimateSelectionId,
 } from '../features/estimates/estimateSelection';
 import ConfirmDialog from '../components/ConfirmDialog';
+import PdfColorPalette from '../components/PdfColorPalette';
 import { deleteEstimateDocument } from '../features/estimates/estimateCrud';
 import { cleanSearch, money, withTimeout } from '../utils';
 import { restDelete, restInsert, restSelect, restUpdate } from '../supabaseRest';
@@ -940,13 +941,13 @@ export default function EstimatesPage({ auth, settings }: EstimatesPageProps) {
                               <MenuItem value="stripe">Stripe</MenuItem>
                               <MenuItem value="dark">Dark</MenuItem>
                             </TextField>
-                            <TextField
-                              label="Акцент PDF"
-                              value={estimateDraft.pdfAccentColor}
-                              onChange={(event) => setEstimateDraft((prev) => ({ ...prev, pdfAccentColor: event.target.value }))}
-                              sx={{ minWidth: { md: 180 } }}
-                            />
                           </Stack>
+
+                          <PdfColorPalette
+                            value={estimateDraft.pdfAccentColor}
+                            onChange={(pdfAccentColor) => setEstimateDraft((prev) => ({ ...prev, pdfAccentColor }))}
+                            label="Акцент PDF"
+                          />
 
                           <Stack direction={{ xs: 'column', md: 'row' }} spacing={2}>
                             <TextField

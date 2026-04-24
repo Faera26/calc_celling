@@ -16,7 +16,6 @@ import {
 } from '@mui/material';
 import {
   AdminPanelSettings as AdminIcon,
-  AutoFixHigh as CatalogManagerIcon,
   Close as CloseIcon,
   Logout as LogoutIcon,
   PictureAsPdf as PdfIcon,
@@ -24,6 +23,7 @@ import {
 } from '@mui/icons-material';
 import type { CompanySettings } from '../types';
 import { APP_ROUTES } from '../features/app/navigation';
+import PdfColorPalette from './PdfColorPalette';
 
 interface SettingsDrawerProps {
   open: boolean;
@@ -157,15 +157,14 @@ export default function SettingsDrawer({
                   <MenuItem value="dark">Dark</MenuItem>
                 </TextField>
 
-                <TextField
-                  fullWidth
-                  size="small"
-                  label="Акцентный цвет PDF"
-                  value={settings.defaultPdfAccentColor}
-                  onChange={(event) => onUpdate({ defaultPdfAccentColor: event.target.value })}
-                  disabled={!isAdmin}
-                />
               </Stack>
+
+              <PdfColorPalette
+                value={settings.defaultPdfAccentColor}
+                onChange={(defaultPdfAccentColor) => onUpdate({ defaultPdfAccentColor })}
+                disabled={!isAdmin}
+                label="Акцентный цвет PDF"
+              />
 
               <TextField
                 fullWidth
@@ -195,17 +194,7 @@ export default function SettingsDrawer({
                   startIcon={<AdminIcon />}
                   sx={{ justifyContent: 'flex-start', borderRadius: '14px', textTransform: 'none' }}
                 >
-                  Открыть админку
-                </Button>
-                <Button
-                  component={Link}
-                  href={APP_ROUTES.catalogManager}
-                  onClick={onClose}
-                  variant="outlined"
-                  startIcon={<CatalogManagerIcon />}
-                  sx={{ justifyContent: 'flex-start', borderRadius: '14px', textTransform: 'none' }}
-                >
-                  Управление каталогом
+                  Открыть админку доступа
                 </Button>
               </Stack>
             </DrawerCard>

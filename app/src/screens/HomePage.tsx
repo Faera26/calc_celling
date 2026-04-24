@@ -15,7 +15,6 @@ import {
   AutoAwesome as AutoAwesomeIcon,
   Description as DescriptionIcon,
   Roofing as RoofingIcon,
-  SettingsSuggest as SettingsSuggestIcon,
   Storefront as StorefrontIcon,
 } from '@mui/icons-material';
 import type { AuthState, CompanySettings } from '../types';
@@ -108,17 +107,8 @@ export default function HomePage({ auth, settings }: HomePageProps) {
       },
     ];
 
-    if (auth.isAdmin) {
-      actions.push({
-        href: APP_ROUTES.catalogManager,
-        title: 'Управление каталогом',
-        subtitle: 'Редактировать карточки, фото и структуру каталога.',
-        icon: <SettingsSuggestIcon />,
-      });
-    }
-
     return actions;
-  }, [auth.isAdmin]);
+  }, []);
 
   return (
     <Box sx={{ p: { xs: 2, md: 3.5 }, maxWidth: 1600, mx: 'auto' }}>

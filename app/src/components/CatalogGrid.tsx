@@ -18,8 +18,11 @@ interface CatalogGridBaseProps {
 interface CatalogGridBrowseProps extends CatalogGridBaseProps {
   mode?: 'browse';
   cart: Record<string, CartEntry>;
+  deletingItemId?: string;
   onAddToCart: (type: CatalogType, item: CatalogItem) => void | Promise<void>;
   onRemoveFromCart: (cartKey: string) => void;
+  onEditItem?: (item: CatalogItem) => void;
+  onDeleteItem?: (item: CatalogItem) => void;
 }
 
 interface CatalogGridManageProps extends CatalogGridBaseProps {
@@ -102,6 +105,8 @@ export default function CatalogGrid(props: CatalogGridProps) {
         const cardKey = keyOf(activeType, item.id);
         const cachedComponents = nodeComponents[item.id];
         const cartQty = props.cart[cardKey]?.qty || 0;
+        const editItem = props.onEditItem;
+        const deleteItem = props.onDeleteItem;
 
         return (
           <CatalogCard
@@ -113,11 +118,14 @@ export default function CatalogGrid(props: CatalogGridProps) {
             cachedComponents={cachedComponents}
             settings={settings}
             mode="browse"
+            deleteInProgress={props.deletingItemId === item.id}
             onAddToCart={() => props.onAddToCart(activeType, item)}
             onRemoveFromCart={() => props.onRemoveFromCart(cardKey)}
             onViewNode={() => onViewNode(item)}
             onOpenConstructor={() => onOpenConstructor(item)}
             onOpenDetails={() => onOpenDetails(item)}
+            onEdit={editItem ? () => editItem(item) : undefined}
+            onDelete={deleteItem ? () => deleteItem(item) : undefined}
           />
         );
       })}
