@@ -67,6 +67,7 @@ import PdfColorPalette from '../components/PdfColorPalette';
 import { deleteEstimateDocument } from '../features/estimates/estimateCrud';
 import {
   buildCeilingProjectSnapshot,
+  calculateCeilingSketchMetrics,
   createDefaultCeilingSketch,
   formatSketchNumber,
 } from '../features/ceilingSketch/ceilingSketch';
@@ -217,6 +218,27 @@ function createSketchFromSavedRoom(room: SavedEstimateRoom): CeilingSketch {
   }
 
   return createDefaultCeilingSketch();
+}
+
+function createBlankSavedRoom(estimateId: string, index: number): SavedEstimateRoom {
+  const ceilingSketch = createDefaultCeilingSketch();
+  const metrics = calculateCeilingSketchMetrics(ceilingSketch);
+
+  return {
+    id: crypto.randomUUID(),
+    smeta_id: estimateId,
+    position_index: index,
+    name: `Комната ${index}`,
+    area: Number(formatSketchNumber(metrics.areaM2)),
+    perimeter: Number(formatSketchNumber(metrics.perimeterM)),
+    corners: metrics.corners,
+    light_points: metrics.lightPoints,
+    pipes: metrics.pipes,
+    curtain_tracks: Number(formatSketchNumber(metrics.curtainTracksM)),
+    niches: Number(formatSketchNumber(metrics.nichesM)),
+    comment: '',
+    ceilingSketch,
+  };
 }
 
 function estimatePdfSettings(estimate: SavedEstimate | undefined, fallback: CompanySettings) {
@@ -556,6 +578,41 @@ export default function EstimatesPage({ auth, settings }: EstimatesPageProps) {
     )));
   }
 
+  function addRoomDraft() {
+    if (!selectedEstimate) return;
+
+    const room = createBlankSavedRoom(selectedEstimate.id, roomDrafts.length + 1);
+    setRoomDrafts((prev) => [...prev, room]);
+    setEditingRoomSketchId(room.id);
+    setNotice('Комната добавлена. Чертеж и метрики попадут в смету после сохранения.');
+  }
+
+  function removeRoomDraft(roomId: string) {
+    if (roomDrafts.length <= 1) return;
+
+    const fallbackRoomId = roomDrafts.find((room) => room.id !== roomId)?.id || COMMON_ROOM;
+
+    if (originalRoomIds.has(roomId)) {
+      setDeletedRoomIds((prev) => [...new Set([...prev, roomId])]);
+    }
+
+    setRoomDrafts((prev) => prev
+      .filter((room) => room.id !== roomId)
+      .map((room, index) => ({ ...room, position_index: index + 1 })));
+    setPositionDrafts((prev) => prev.map((position) => (
+      position.room_id === roomId ? { ...position, room_id: null } : position
+    )));
+    setAddDraft((prev) => (
+      prev.roomId === roomId ? { ...prev, roomId: estimateDraft.useCommonSection ? COMMON_ROOM : fallbackRoomId } : prev
+    ));
+
+    if (editingRoomSketchId === roomId) {
+      setEditingRoomSketchId(null);
+    }
+
+    setNotice('Комната удалена из черновика. Нажмите "Сохранить изменения", чтобы применить.');
+  }
+
   function removePosition(positionId: string) {
     if (originalPositionIds.has(positionId)) {
       setDeletedPositionIds((prev) => [...new Set([...prev, positionId])]);
@@ -872,7 +929,7 @@ export default function EstimatesPage({ auth, settings }: EstimatesPageProps) {
     : null;
 
   return (
-    <Box sx={{ p: { xs: 1.5, sm: 2, lg: 3 }, maxWidth: 1500, mx: 'auto' }}>
+    <Box sx={{ p: { xs: 1.5, sm: 2, lg: 3 }, pb: { xs: 10, md: 3 }, maxWidth: 1500, mx: 'auto' }}>
       <Stack direction={{ xs: 'column', md: 'row' }} sx={{ alignItems: { md: 'center' }, justifyContent: 'space-between', gap: 2, mb: 3 }}>
         <Box>
           <Typography variant="h4">Сметы</Typography>
@@ -1097,33 +1154,68 @@ export default function EstimatesPage({ auth, settings }: EstimatesPageProps) {
                               Эти метрики уже сохранены в смете и помогают менеджеру быстро понимать, откуда взялся расчёт.
                             </Typography>
                           </Box>
-                          <Chip size="small" variant="outlined" label={`${roomDrafts.length} комн.`} />
+                          <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} sx={{ width: { xs: '100%', sm: 'auto' } }}>
+                            <Chip size="small" variant="outlined" label={`${roomDrafts.length} комн.`} sx={{ alignSelf: { xs: 'flex-start', sm: 'center' } }} />
+                            <Button
+                              variant="contained"
+                              size="large"
+                              startIcon={<AddIcon />}
+                              onClick={addRoomDraft}
+                              disabled={saving || detailsLoading || deletingEstimate}
+                              sx={{ minHeight: 50, width: { xs: '100%', sm: 'auto' } }}
+                            >
+                              Добавить комнату
+                            </Button>
+                          </Stack>
                         </Stack>
 
                         <Stack spacing={1.25}>
-                          {roomDrafts.map((room) => (
-                            <Box key={room.id} sx={{ p: 1.5, borderRadius: 2, border: '1px solid', borderColor: 'divider' }}>
-                              <Stack direction={{ xs: 'column', md: 'row' }} sx={{ justifyContent: 'space-between', gap: 1 }}>
-                                <Box>
+                          {roomDrafts.map((room, index) => (
+                            <Box
+                              key={room.id}
+                              sx={{
+                                p: { xs: 1.25, md: 1.5 },
+                                borderRadius: 2,
+                                border: '1px solid',
+                                borderColor: room.ceilingSketch ? 'primary.light' : 'divider',
+                                bgcolor: room.ceilingSketch ? 'primary.50' : 'background.paper',
+                              }}
+                            >
+                              <Stack direction={{ xs: 'column', md: 'row' }} sx={{ justifyContent: 'space-between', gap: 1.25 }}>
+                                <Box sx={{ minWidth: 0 }}>
+                                  <Chip size="small" color="primary" variant="outlined" label={`Комната ${index + 1}`} sx={{ mb: 0.75 }} />
                                   <Typography sx={{ fontWeight: 700 }}>{room.name}</Typography>
                                   <Typography variant="body2" color="text.secondary">{room.comment || 'Без заметки'}</Typography>
                                 </Box>
-                                <Stack direction="row" spacing={1} sx={{ flexWrap: 'wrap', gap: 1 }}>
+                                <Stack direction="row" spacing={1} sx={{ flexWrap: 'wrap', gap: 1, alignContent: 'flex-start' }}>
                                   <Chip size="small" label={`Площадь: ${num(room.area)} м²`} />
                                   <Chip size="small" label={`Периметр: ${num(room.perimeter)} м`} />
                                   <Chip size="small" label={`Свет: ${num(room.light_points)}`} />
                                   <Chip size="small" label={`Трубы: ${num(room.pipes)}`} />
                                   {room.ceilingSketch && <Chip size="small" color="primary" label="Есть чертеж" />}
+                                </Stack>
+                              </Stack>
+                              <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} sx={{ mt: 1.25, width: '100%' }}>
                                   <Button
-                                    size="small"
-                                    variant="outlined"
+                                    size="large"
+                                    variant="contained"
                                     startIcon={<ArchitectureIcon />}
                                     onClick={() => openRoomSketch(room.id)}
-                                    sx={{ minHeight: 36 }}
+                                    sx={{ minHeight: 50, flex: 1 }}
                                   >
-                                    Чертеж
+                                    Открыть чертеж
                                   </Button>
-                                </Stack>
+                                  <Button
+                                    size="large"
+                                    variant="outlined"
+                                    color="error"
+                                    startIcon={<DeleteIcon />}
+                                    disabled={roomDrafts.length === 1 || saving || detailsLoading || deletingEstimate}
+                                    onClick={() => removeRoomDraft(room.id)}
+                                    sx={{ minHeight: 50, width: { xs: '100%', sm: 'auto' } }}
+                                  >
+                                    Удалить
+                                  </Button>
                               </Stack>
                             </Box>
                           ))}
@@ -1451,6 +1543,60 @@ export default function EstimatesPage({ auth, settings }: EstimatesPageProps) {
         </Stack>
       )}
 
+      {selectedEstimate && isCompactLayout && (
+        <Box
+          sx={{
+            position: 'sticky',
+            bottom: 0,
+            zIndex: 20,
+            mx: -1.5,
+            mt: 1.5,
+            px: 1.5,
+            py: 1,
+            bgcolor: 'background.paper',
+            borderTop: '1px solid',
+            borderColor: 'divider',
+            boxShadow: '0 -10px 24px rgba(15, 23, 42, 0.12)',
+          }}
+        >
+          <Stack spacing={1}>
+            <Button
+              size="large"
+              variant="contained"
+              startIcon={<SaveIcon />}
+              disabled={saving || detailsLoading || deletingEstimate}
+              onClick={saveEstimateEditor}
+              fullWidth
+              sx={{ minHeight: 50 }}
+            >
+              {saving ? 'Сохраняю...' : 'Сохранить изменения'}
+            </Button>
+            <Stack direction="row" spacing={1}>
+              <Button
+                size="large"
+                variant="outlined"
+                startIcon={<AddIcon />}
+                disabled={saving || detailsLoading || deletingEstimate}
+                onClick={addRoomDraft}
+                sx={{ minHeight: 50, flex: 1, minWidth: 0 }}
+              >
+                Комната
+              </Button>
+              <Button
+                size="large"
+                variant="outlined"
+                startIcon={<PdfIcon />}
+                disabled={positionDrafts.length === 0}
+                onClick={handlePdfExport}
+                sx={{ minHeight: 50, flex: 1, minWidth: 0 }}
+              >
+                PDF
+              </Button>
+            </Stack>
+          </Stack>
+        </Box>
+      )}
+
       <ConfirmDialog
         open={Boolean(deleteTarget)}
         title="Удалить смету целиком?"
@@ -1475,14 +1621,29 @@ export default function EstimatesPage({ auth, settings }: EstimatesPageProps) {
       {editingRoomSketch && (
         <Dialog open onClose={() => setEditingRoomSketchId(null)} maxWidth="xl" fullWidth fullScreen={isCompactLayout}>
           <DialogTitle>Чертеж потолка: {editingRoomSketch.name}</DialogTitle>
-          <DialogContent dividers sx={{ p: { xs: 1, md: 2 } }}>
+          <DialogContent dividers sx={{ p: { xs: 1, md: 2 }, bgcolor: 'grey.50' }}>
             <CeilingSketcher
               value={editingRoomSketch.ceilingSketch || createSketchFromSavedRoom(editingRoomSketch)}
               onChange={(sketch, metrics) => updateRoomSketch(editingRoomSketch.id, sketch, metrics)}
             />
           </DialogContent>
-          <DialogActions>
-            <Button onClick={() => setEditingRoomSketchId(null)} variant="contained">
+          <DialogActions
+            sx={{
+              px: { xs: 1.5, md: 3 },
+              py: 1.5,
+              position: 'sticky',
+              bottom: 0,
+              bgcolor: 'background.paper',
+              borderTop: '1px solid',
+              borderColor: 'divider',
+            }}
+          >
+            <Button
+              onClick={() => setEditingRoomSketchId(null)}
+              variant="contained"
+              size="large"
+              sx={{ minHeight: 50, width: { xs: '100%', sm: 'auto' } }}
+            >
               Готово
             </Button>
           </DialogActions>

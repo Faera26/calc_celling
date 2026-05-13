@@ -21,7 +21,7 @@ import {
   useMediaQuery,
   useTheme,
 } from '@mui/material';
-import { Add as AddIcon, Delete as DeleteIcon } from '@mui/icons-material';
+import { Add as AddIcon, Architecture as ArchitectureIcon, Delete as DeleteIcon } from '@mui/icons-material';
 import type {
   CartRow,
   CeilingSketch,
@@ -179,6 +179,7 @@ export default function SaveEstimateDialog({
   const [ruleOptions, setRuleOptions] = useState<Record<string, RuleCatalogOption[]>>({});
   const [rulesLoading, setRulesLoading] = useState(false);
   const [rulesError, setRulesError] = useState('');
+  const [editingRoomSketchId, setEditingRoomSketchId] = useState<string | null>(null);
 
   useEffect(() => {
     if (!open) return;
@@ -188,6 +189,7 @@ export default function SaveEstimateDialog({
     setDraft(initialDraft);
     setRuleOptions({});
     setRulesError('');
+    setEditingRoomSketchId(null);
 
     async function preloadRuleCatalog() {
       setRulesLoading(true);
@@ -227,6 +229,9 @@ export default function SaveEstimateDialog({
   );
 
   const automaticPositions = previewEstimate.positions.filter((position) => position.sourceSnapshot.auto_generated);
+  const editingRoomSketch = editingRoomSketchId
+    ? draft.rooms.find((room) => room.id === editingRoomSketchId) || null
+    : null;
 
   function updateRoom(roomId: string, patch: Partial<EstimateRoomDraft>) {
     setDraft((prev) => ({
@@ -255,7 +260,23 @@ export default function SaveEstimateDialog({
     }));
   }
 
+  function openRoomSketch(roomId: string) {
+    setDraft((prev) => ({
+      ...prev,
+      rooms: prev.rooms.map((room) => (
+        room.id === roomId
+          ? { ...room, ceilingSketch: room.ceilingSketch || createDefaultCeilingSketch() }
+          : room
+      )),
+    }));
+    setEditingRoomSketchId(roomId);
+  }
+
   function removeRoom(roomId: string) {
+    if (editingRoomSketchId === roomId) {
+      setEditingRoomSketchId(null);
+    }
+
     setDraft((prev) => ({
       ...prev,
       rooms: prev.rooms.length > 1 ? prev.rooms.filter((room) => room.id !== roomId) : prev.rooms,
@@ -387,7 +408,7 @@ export default function SaveEstimateDialog({
                 Площадь нужна для материалов по м², периметр для профилей и вставок, а дополнительные поля помогают считать свет, трубы, карнизы и ниши.
               </Typography>
             </Box>
-            <Button startIcon={<AddIcon />} variant="outlined" onClick={addRoom}>
+            <Button startIcon={<AddIcon />} variant="outlined" size="large" onClick={addRoom} sx={{ minHeight: 48, width: { xs: '100%', sm: 'auto' } }}>
               Добавить комнату
             </Button>
           </Stack>
@@ -402,10 +423,37 @@ export default function SaveEstimateDialog({
                   </IconButton>
                 </Stack>
 
-                <CeilingSketcher
-                  value={room.ceilingSketch || createDefaultCeilingSketch()}
-                  onChange={(sketch, metrics) => updateRoomSketch(room.id, sketch, metrics)}
-                />
+                <Box
+                  sx={{
+                    mb: 2,
+                    p: { xs: 1.25, md: 1.5 },
+                    borderRadius: 2,
+                    border: '1px solid',
+                    borderColor: room.ceilingSketch ? 'primary.light' : 'divider',
+                    bgcolor: room.ceilingSketch ? 'primary.50' : 'grey.50',
+                  }}
+                >
+                  <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.25} sx={{ alignItems: { sm: 'center' }, justifyContent: 'space-between' }}>
+                    <Box sx={{ minWidth: 0 }}>
+                      <Typography sx={{ fontWeight: 700 }}>Чертеж потолка</Typography>
+                      <Stack direction="row" spacing={1} sx={{ flexWrap: 'wrap', gap: 1, mt: 1 }}>
+                        <Chip size="small" label={`${room.area || '0'} м²`} />
+                        <Chip size="small" label={`${room.perimeter || '0'} м`} />
+                        <Chip size="small" label={`${room.corners || '0'} угл.`} />
+                        {room.ceilingSketch && <Chip size="small" color="primary" label="Есть чертеж" />}
+                      </Stack>
+                    </Box>
+                    <Button
+                      size="large"
+                      variant="contained"
+                      startIcon={<ArchitectureIcon />}
+                      onClick={() => openRoomSketch(room.id)}
+                      sx={{ minHeight: 52, width: { xs: '100%', sm: 'auto' }, flexShrink: 0 }}
+                    >
+                      Открыть чертеж
+                    </Button>
+                  </Stack>
+                </Box>
 
                 <Typography variant="subtitle2" sx={{ mt: 2, mb: 1 }}>
                   Метрики для калькулятора
@@ -599,15 +647,63 @@ export default function SaveEstimateDialog({
           </Box>
         </Stack>
       </DialogContent>
-      <DialogActions sx={{ px: { xs: 2, md: 3 }, py: 2 }}>
-        <Button onClick={onClose} disabled={saving}>Отмена</Button>
-        <Button
-          variant="contained"
-          onClick={() => onSave(draft)}
-          disabled={saving || previewEstimate.summary.itemsCount === 0}
-        >
-          {saving ? 'Сохраняю...' : 'Сохранить'}
-        </Button>
+      {editingRoomSketch && (
+        <Dialog open onClose={() => setEditingRoomSketchId(null)} maxWidth="xl" fullWidth fullScreen={fullScreen}>
+          <DialogTitle>Чертеж потолка: {editingRoomSketch.name}</DialogTitle>
+          <DialogContent dividers sx={{ p: { xs: 1, md: 2 }, bgcolor: 'grey.50' }}>
+            <CeilingSketcher
+              value={editingRoomSketch.ceilingSketch || createDefaultCeilingSketch()}
+              onChange={(sketch, metrics) => updateRoomSketch(editingRoomSketch.id, sketch, metrics)}
+            />
+          </DialogContent>
+          <DialogActions
+            sx={{
+              px: { xs: 1.5, md: 3 },
+              py: 1.5,
+              position: 'sticky',
+              bottom: 0,
+              zIndex: 1,
+              bgcolor: 'background.paper',
+              borderTop: '1px solid',
+              borderColor: 'divider',
+            }}
+          >
+            <Button
+              onClick={() => setEditingRoomSketchId(null)}
+              variant="contained"
+              size="large"
+              sx={{ minHeight: 50, width: { xs: '100%', sm: 'auto' } }}
+            >
+              Готово
+            </Button>
+          </DialogActions>
+        </Dialog>
+      )}
+
+      <DialogActions
+        sx={{
+          px: { xs: 1.5, md: 3 },
+          py: 1.5,
+          position: 'sticky',
+          bottom: 0,
+          zIndex: 1,
+          bgcolor: 'background.paper',
+          borderTop: '1px solid',
+          borderColor: 'divider',
+        }}
+      >
+        <Stack direction={{ xs: 'column-reverse', sm: 'row' }} spacing={1} sx={{ width: '100%', justifyContent: 'flex-end' }}>
+          <Button onClick={onClose} disabled={saving} size="large" sx={{ minHeight: 50, width: { xs: '100%', sm: 'auto' } }}>Отмена</Button>
+          <Button
+            variant="contained"
+            size="large"
+            onClick={() => onSave(draft)}
+            disabled={saving || previewEstimate.summary.itemsCount === 0}
+            sx={{ minHeight: 50, width: { xs: '100%', sm: 'auto' } }}
+          >
+            {saving ? 'Сохраняю...' : 'Сохранить'}
+          </Button>
+        </Stack>
       </DialogActions>
     </Dialog>
   );

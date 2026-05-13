@@ -317,6 +317,50 @@ export default function CeilingSketcher({ value, onChange }: CeilingSketcherProp
     if (obstacle) emit(updateObstacle(value, selectedObjectId, nextPoint));
   }
 
+  function renderToolButtons() {
+    return (
+      <Stack
+        direction="row"
+        spacing={1}
+        sx={{
+          mx: -0.5,
+          px: 0.5,
+          pb: 0.5,
+          overflowX: 'auto',
+          scrollbarWidth: 'thin',
+          '& .MuiButton-root': {
+            minHeight: 50,
+            flexShrink: 0,
+            borderRadius: 2,
+            whiteSpace: 'nowrap',
+          },
+        }}
+      >
+        <Button size="large" variant="outlined" startIcon={<AddIcon />} onClick={() => emit(addCeilingCorner(value))}>
+          Угол
+        </Button>
+        <Button size="large" variant="outlined" startIcon={<LightbulbIcon />} onClick={() => emit(addFixture(value, 'spot'))}>
+          Свет
+        </Button>
+        <Button size="large" variant="outlined" startIcon={<LinearScaleIcon />} onClick={() => emit(addLinearFeature(value, 'light_line'))}>
+          Линия
+        </Button>
+        <Button size="large" variant="outlined" startIcon={<PlumbingIcon />} onClick={() => emit(addObstacle(value, 'pipe'))}>
+          Труба
+        </Button>
+        <Button size="large" variant="outlined" startIcon={<LinearScaleIcon />} onClick={() => emit(addLinearFeature(value, 'curtain_track'))}>
+          Карниз
+        </Button>
+        <Button size="large" variant="outlined" startIcon={<LayersIcon />} onClick={() => emit(addCeilingLevel(value))}>
+          Уровень
+        </Button>
+        <Button size="large" variant="outlined" startIcon={<TextureIcon />} onClick={() => emit(addFabricSeam(value))}>
+          Шов
+        </Button>
+      </Stack>
+    );
+  }
+
   function renderHandle(target: DragTarget, point: CeilingSketchPointRef, color: string, label?: string) {
     const selected = selectedObjectId === target.id;
 
@@ -369,35 +413,36 @@ export default function CeilingSketcher({ value, onChange }: CeilingSketcherProp
         bgcolor: 'background.paper',
       }}
     >
-      <Stack direction={{ xs: 'column', lg: 'row' }} sx={{ minHeight: { xs: 720, lg: 600 } }}>
+      <Stack direction={{ xs: 'column', lg: 'row' }} sx={{ minHeight: { xs: 'calc(100dvh - 146px)', lg: 600 } }}>
         <Box sx={{ flexGrow: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
           <Stack
-            direction={{ xs: 'column', md: 'row' }}
             sx={{
-              alignItems: { md: 'center' },
-              justifyContent: 'space-between',
               gap: 1,
               p: 1,
               borderBottom: '1px solid',
               borderColor: 'divider',
             }}
           >
-            <Stack direction="row" spacing={1} sx={{ flexWrap: 'wrap', gap: 1 }}>
-              <Chip color="primary" label={`${metrics.areaM2} м²`} />
-              <Chip label={`${metrics.perimeterM} м`} />
-              <Chip label={`${metrics.corners} угл.`} />
-              <Chip label="Сетка 50 мм" />
-              <Chip label="X/Y привязки" />
+            <Stack direction={{ xs: 'column', md: 'row' }} sx={{ alignItems: { md: 'center' }, justifyContent: 'space-between', gap: 1 }}>
+              <Stack direction="row" spacing={1} sx={{ flexWrap: 'wrap', gap: 1 }}>
+                <Chip color="primary" label={`${metrics.areaM2} м²`} />
+                <Chip label={`${metrics.perimeterM} м`} />
+                <Chip label={`${metrics.corners} угл.`} />
+                <Chip label="Сетка 50 мм" />
+                <Chip label="X/Y привязки" />
+              </Stack>
+
+              <Stack direction="row" spacing={1} sx={{ flexWrap: 'wrap', gap: 1 }}>
+                {snapGuides.map((guide) => (
+                  <Chip key={`${guide.axis}-${guide.value}-${guide.label}`} color="success" label={guide.label} />
+                ))}
+              </Stack>
             </Stack>
 
-            <Stack direction="row" spacing={1} sx={{ flexWrap: 'wrap', gap: 1 }}>
-              {snapGuides.map((guide) => (
-                <Chip key={`${guide.axis}-${guide.value}-${guide.label}`} color="success" label={guide.label} />
-              ))}
-            </Stack>
+            {renderToolButtons()}
           </Stack>
 
-          <Box sx={{ flexGrow: 1, minHeight: { xs: 430, md: 520 } }}>
+          <Box sx={{ flexGrow: 1, minHeight: { xs: 360, md: 520 } }}>
             <svg
               ref={svgRef}
               viewBox={viewBoxString(activeViewBox)}
@@ -622,30 +667,6 @@ export default function CeilingSketcher({ value, onChange }: CeilingSketcherProp
                 />
               </Stack>
             )}
-
-            <Stack direction="row" spacing={1} sx={{ flexWrap: 'wrap', gap: 1 }}>
-              <Button size="large" variant="outlined" startIcon={<AddIcon />} onClick={() => emit(addCeilingCorner(value))}>
-                Угол
-              </Button>
-              <Button size="large" variant="outlined" startIcon={<LightbulbIcon />} onClick={() => emit(addFixture(value, 'spot'))}>
-                Свет
-              </Button>
-              <Button size="large" variant="outlined" startIcon={<LinearScaleIcon />} onClick={() => emit(addLinearFeature(value, 'light_line'))}>
-                Линия
-              </Button>
-              <Button size="large" variant="outlined" startIcon={<PlumbingIcon />} onClick={() => emit(addObstacle(value, 'pipe'))}>
-                Труба
-              </Button>
-              <Button size="large" variant="outlined" startIcon={<LinearScaleIcon />} onClick={() => emit(addLinearFeature(value, 'curtain_track'))}>
-                Карниз
-              </Button>
-              <Button size="large" variant="outlined" startIcon={<LayersIcon />} onClick={() => emit(addCeilingLevel(value))}>
-                Уровень
-              </Button>
-              <Button size="large" variant="outlined" startIcon={<TextureIcon />} onClick={() => emit(addFabricSeam(value))}>
-                Шов
-              </Button>
-            </Stack>
 
             <Button
               color="error"
