@@ -24,6 +24,7 @@ import {
 } from '@mui/material';
 import {
   Add as AddIcon,
+  Architecture as ArchitectureIcon,
   ArrowDownward as ArrowDownwardIcon,
   ArrowUpward as ArrowUpwardIcon,
   Delete as DeleteIcon,
@@ -35,10 +36,13 @@ import {
 } from '@mui/icons-material';
 import type {
   AuthState,
+  CeilingSketch,
+  CeilingSketchMetrics,
   CompanySettings,
   ComponentType,
   EstimateDocumentType,
   EstimatePdfTemplate,
+  EstimateSettingsSnapshot,
   SavedEstimate,
   SavedEstimatePosition,
   SavedEstimateRoom,
@@ -58,8 +62,14 @@ import {
   resolveEstimateSelectionId,
 } from '../features/estimates/estimateSelection';
 import ConfirmDialog from '../components/ConfirmDialog';
+import CeilingSketcher from '../components/CeilingSketcher';
 import PdfColorPalette from '../components/PdfColorPalette';
 import { deleteEstimateDocument } from '../features/estimates/estimateCrud';
+import {
+  buildCeilingProjectSnapshot,
+  createDefaultCeilingSketch,
+  formatSketchNumber,
+} from '../features/ceilingSketch/ceilingSketch';
 import { cleanSearch, money, withTimeout } from '../utils';
 import { restDelete, restInsert, restSelect, restUpdate } from '../supabaseRest';
 import { readStoredAuthUser, supabase } from '../supabaseClient';
@@ -164,6 +174,51 @@ function estimateSettingsWithRules(estimate: SavedEstimate | undefined) {
   };
 }
 
+function ceilingProjectOf(estimate: SavedEstimate | undefined): EstimateSettingsSnapshot['ceiling_project'] {
+  const snapshot = estimateSettingsWithRules(estimate) as EstimateSettingsSnapshot;
+  const project = snapshot.ceiling_project;
+
+  if (!project || project.source !== 'ceiling_sketcher' || !Array.isArray(project.rooms)) {
+    return null;
+  }
+
+  return project;
+}
+
+function ceilingSketchByRoomId(estimate: SavedEstimate | undefined) {
+  const project = ceilingProjectOf(estimate);
+  const map = new Map<string, CeilingSketch>();
+
+  project?.rooms.forEach((room) => {
+    if (room.room_id && room.sketch) {
+      map.set(room.room_id, room.sketch);
+    }
+  });
+
+  return map;
+}
+
+function createSketchFromSavedRoom(room: SavedEstimateRoom): CeilingSketch {
+  const areaM2 = num(room.area);
+  const perimeterM = num(room.perimeter);
+  const halfPerimeterMm = perimeterM > 0 ? perimeterM * 500 : 0;
+  const areaMm2 = areaM2 > 0 ? areaM2 * 1_000_000 : 0;
+
+  if (halfPerimeterMm > 0 && areaMm2 > 0) {
+    const discriminant = Math.max(0, halfPerimeterMm ** 2 - 4 * areaMm2);
+    const widthMm = Math.max(600, Math.round((halfPerimeterMm + Math.sqrt(discriminant)) / 2));
+    const depthMm = Math.max(600, Math.round(areaMm2 / widthMm));
+    return createDefaultCeilingSketch(widthMm, depthMm);
+  }
+
+  if (areaM2 > 0) {
+    const sideMm = Math.max(600, Math.round(Math.sqrt(areaM2) * 1000));
+    return createDefaultCeilingSketch(sideMm, sideMm);
+  }
+
+  return createDefaultCeilingSketch();
+}
+
 function estimatePdfSettings(estimate: SavedEstimate | undefined, fallback: CompanySettings) {
   const snapshot = estimateSettingsWithRules(estimate);
 
@@ -248,6 +303,7 @@ export default function EstimatesPage({ auth, settings }: EstimatesPageProps) {
   const [notice, setNotice] = useState('');
   const [addDraft, setAddDraft] = useState<AddLocalPositionDraft>(() => emptyAddDraft());
   const [editingPositionId, setEditingPositionId] = useState<string | null>(null);
+  const [editingRoomSketchId, setEditingRoomSketchId] = useState<string | null>(null);
   const [draggedPositionId, setDraggedPositionId] = useState<string | null>(null);
   const [dragOverPositionId, setDragOverPositionId] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<DeleteEstimateTarget | null>(null);
@@ -424,9 +480,15 @@ export default function EstimatesPage({ auth, settings }: EstimatesPageProps) {
         const [roomRows, positionRows] = await Promise.all([roomsPromise, positionsPromise]);
         if (cancelled) return;
 
-        setRooms(roomRows);
+        const savedSketches = ceilingSketchByRoomId(selectedEstimate);
+        const hydratedRooms = roomRows.map((room) => ({
+          ...room,
+          ceilingSketch: savedSketches.get(room.id) || null,
+        }));
+
+        setRooms(hydratedRooms);
         setPositions(positionRows);
-        setRoomDrafts(roomRows);
+        setRoomDrafts(hydratedRooms);
         setPositionDrafts(positionRows);
         setDeletedRoomIds([]);
         setDeletedPositionIds([]);
@@ -465,6 +527,33 @@ export default function EstimatesPage({ auth, settings }: EstimatesPageProps) {
         },
       };
     }));
+  }
+
+  function openRoomSketch(roomId: string) {
+    setRoomDrafts((prev) => prev.map((room) => (
+      room.id === roomId && !room.ceilingSketch
+        ? { ...room, ceilingSketch: createSketchFromSavedRoom(room) }
+        : room
+    )));
+    setEditingRoomSketchId(roomId);
+  }
+
+  function updateRoomSketch(roomId: string, sketch: CeilingSketch, metrics: CeilingSketchMetrics) {
+    setRoomDrafts((prev) => prev.map((room) => (
+      room.id === roomId
+        ? {
+          ...room,
+          ceilingSketch: sketch,
+          area: Number(formatSketchNumber(metrics.areaM2)),
+          perimeter: Number(formatSketchNumber(metrics.perimeterM)),
+          corners: metrics.corners,
+          light_points: metrics.lightPoints,
+          pipes: metrics.pipes,
+          curtain_tracks: Number(formatSketchNumber(metrics.curtainTracksM)),
+          niches: Number(formatSketchNumber(metrics.nichesM)),
+        }
+        : room
+    )));
   }
 
   function removePosition(positionId: string) {
@@ -624,6 +713,7 @@ export default function EstimatesPage({ auth, settings }: EstimatesPageProps) {
       setSelectedId(resolveEstimateSelectionId(nextEstimates, nextSelectedId));
       setDeleteTarget(null);
       setEditingPositionId(null);
+      setEditingRoomSketchId(null);
       setDraggedPositionId(null);
       setDragOverPositionId(null);
       setAddDraft(emptyAddDraft());
@@ -678,6 +768,11 @@ export default function EstimatesPage({ auth, settings }: EstimatesPageProps) {
           pdfNote: pdfSettings.pdfNote,
           marginPercent: num(estimateDraft.marginPercent),
           discountPercent: num(estimateDraft.discountPercent),
+          ceiling_project: buildCeilingProjectSnapshot(roomDrafts.map((room) => ({
+            id: room.id,
+            name: room.name,
+            ceilingSketch: room.ceilingSketch || null,
+          }))),
         },
         updated_at: new Date().toISOString(),
       }, {
@@ -721,7 +816,11 @@ export default function EstimatesPage({ auth, settings }: EstimatesPageProps) {
         returning: 'minimal',
       })));
 
-      const savedRooms: SavedEstimateRoom[] = roomPayloads.map((room) => ({ ...room }));
+      const sketchByRoom = new Map(roomDrafts.map((room) => [room.id, room.ceilingSketch || null]));
+      const savedRooms: SavedEstimateRoom[] = roomPayloads.map((room) => ({
+        ...room,
+        ceilingSketch: sketchByRoom.get(room.id) || null,
+      }));
       const savedPositions: SavedEstimatePosition[] = positionPayloads.map((position) => ({ ...position }));
 
       setRooms(savedRooms);
@@ -767,6 +866,9 @@ export default function EstimatesPage({ auth, settings }: EstimatesPageProps) {
 
   const editingPosition = editingPositionId
     ? positionDrafts.find((position) => position.id === editingPositionId) || null
+    : null;
+  const editingRoomSketch = editingRoomSketchId
+    ? roomDrafts.find((room) => room.id === editingRoomSketchId) || null
     : null;
 
   return (
@@ -1011,6 +1113,16 @@ export default function EstimatesPage({ auth, settings }: EstimatesPageProps) {
                                   <Chip size="small" label={`Периметр: ${num(room.perimeter)} м`} />
                                   <Chip size="small" label={`Свет: ${num(room.light_points)}`} />
                                   <Chip size="small" label={`Трубы: ${num(room.pipes)}`} />
+                                  {room.ceilingSketch && <Chip size="small" color="primary" label="Есть чертеж" />}
+                                  <Button
+                                    size="small"
+                                    variant="outlined"
+                                    startIcon={<ArchitectureIcon />}
+                                    onClick={() => openRoomSketch(room.id)}
+                                    sx={{ minHeight: 36 }}
+                                  >
+                                    Чертеж
+                                  </Button>
                                 </Stack>
                               </Stack>
                             </Box>
@@ -1359,6 +1471,23 @@ export default function EstimatesPage({ auth, settings }: EstimatesPageProps) {
           </Typography>
         </Stack>
       </ConfirmDialog>
+
+      {editingRoomSketch && (
+        <Dialog open onClose={() => setEditingRoomSketchId(null)} maxWidth="xl" fullWidth fullScreen={isCompactLayout}>
+          <DialogTitle>Чертеж потолка: {editingRoomSketch.name}</DialogTitle>
+          <DialogContent dividers sx={{ p: { xs: 1, md: 2 } }}>
+            <CeilingSketcher
+              value={editingRoomSketch.ceilingSketch || createSketchFromSavedRoom(editingRoomSketch)}
+              onChange={(sketch, metrics) => updateRoomSketch(editingRoomSketch.id, sketch, metrics)}
+            />
+          </DialogContent>
+          <DialogActions>
+            <Button onClick={() => setEditingRoomSketchId(null)} variant="contained">
+              Готово
+            </Button>
+          </DialogActions>
+        </Dialog>
+      )}
 
       {editingPosition && (
         <Dialog open onClose={() => setEditingPositionId(null)} maxWidth="md" fullWidth fullScreen={isCompactLayout}>

@@ -374,6 +374,7 @@ export interface SavedEstimateRoom {
   curtain_tracks: number;
   niches: number;
   comment?: string | null;
+  ceilingSketch?: CeilingSketch | null;
 }
 
 export interface SavedEstimatePosition {

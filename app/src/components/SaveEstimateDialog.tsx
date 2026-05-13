@@ -44,6 +44,7 @@ import { cleanSearch, money } from '../utils';
 import PdfColorPalette from './PdfColorPalette';
 import CeilingSketcher from './CeilingSketcher';
 import {
+  calculateCeilingSketchMetrics,
   createDefaultCeilingSketch,
   formatSketchNumber,
 } from '../features/ceilingSketch/ceilingSketch';
@@ -73,18 +74,21 @@ interface SaveEstimateDialogProps {
 }
 
 function emptyRoom(index: number): EstimateRoomDraft {
+  const ceilingSketch = createDefaultCeilingSketch();
+  const metrics = calculateCeilingSketchMetrics(ceilingSketch);
+
   return {
     id: crypto.randomUUID(),
     name: `Комната ${index}`,
-    area: '',
-    perimeter: '',
-    corners: '',
-    lightPoints: '',
-    pipes: '',
-    curtainTracks: '',
-    niches: '',
+    area: formatSketchNumber(metrics.areaM2),
+    perimeter: formatSketchNumber(metrics.perimeterM),
+    corners: String(metrics.corners),
+    lightPoints: String(metrics.lightPoints),
+    pipes: String(metrics.pipes),
+    curtainTracks: formatSketchNumber(metrics.curtainTracksM),
+    niches: formatSketchNumber(metrics.nichesM),
     comment: '',
-    ceilingSketch: createDefaultCeilingSketch(),
+    ceilingSketch,
   };
 }
 

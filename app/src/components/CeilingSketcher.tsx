@@ -2,7 +2,6 @@ import { useMemo, useRef, useState, type PointerEvent } from 'react';
 import {
   Box,
   Button,
-  ButtonGroup,
   Chip,
   Divider,
   MenuItem,
@@ -12,19 +11,20 @@ import {
 } from '@mui/material';
 import {
   Add as AddIcon,
-  Architecture as ArchitectureIcon,
   Delete as DeleteIcon,
   Layers as LayersIcon,
   Lightbulb as LightbulbIcon,
   LinearScale as LinearScaleIcon,
   Plumbing as PlumbingIcon,
   Texture as TextureIcon,
-  ViewInAr as ViewInArIcon,
 } from '@mui/icons-material';
 import type {
   CeilingFabricTexture,
   CeilingSketch,
+  CeilingSketchFixture,
+  CeilingSketchLinearFeature,
   CeilingSketchMetrics,
+  CeilingSketchObstacle,
   CeilingSketchPointRef,
 } from '../types';
 import {
@@ -55,13 +55,33 @@ type DragTarget =
   | { kind: 'obstacle'; id: string }
   | { kind: 'linear'; id: string; endpoint: 'start' | 'end' };
 
+interface ViewBoxState {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+interface SnapGuide {
+  axis: 'x' | 'y';
+  value: number;
+  label: string;
+}
+
 interface CeilingSketcherProps {
   value: CeilingSketch;
   onChange: (nextSketch: CeilingSketch, metrics: CeilingSketchMetrics) => void;
 }
 
+const GRID_STEP_MM = 50;
+const SNAP_DISTANCE_MM = 140;
+
 function lineLengthMm(start: CeilingSketchPointRef, end: CeilingSketchPointRef) {
   return Math.round(Math.hypot(end.xMm - start.xMm, end.yMm - start.yMm));
+}
+
+function roundToStep(value: number, step: number) {
+  return Math.round(value / step) * step;
 }
 
 function featureLabel(kind: string) {
@@ -87,17 +107,125 @@ function sketchPointList(points: CeilingSketchPointRef[]) {
   return points.map((point) => `${point.xMm},${point.yMm}`).join(' ');
 }
 
+function viewBoxString(viewBox: ViewBoxState) {
+  return `${viewBox.x} ${viewBox.y} ${viewBox.width} ${viewBox.height}`;
+}
+
+function selectedPointOf(sketch: CeilingSketch, selectedObjectId: string): CeilingSketchPointRef | null {
+  const corner = sketch.points.find((point) => point.id === selectedObjectId);
+  if (corner) return corner;
+
+  const fixture = sketch.fixtures.find((item) => item.id === selectedObjectId);
+  if (fixture) return fixture.point;
+
+  const obstacle = sketch.obstacles.find((item) => item.id === selectedObjectId);
+  if (obstacle) return obstacle.point;
+
+  return null;
+}
+
+function collectSnapPoints(sketch: CeilingSketch, target: DragTarget): Array<CeilingSketchPointRef & { label: string }> {
+  const points: Array<CeilingSketchPointRef & { label: string }> = [];
+
+  sketch.points.forEach((point, index) => {
+    if (target.kind === 'corner' && point.id === target.id) return;
+    points.push({ xMm: point.xMm, yMm: point.yMm, label: `угол ${index + 1}` });
+  });
+
+  sketch.fixtures.forEach((fixture, index) => {
+    if (target.kind === 'fixture' && fixture.id === target.id) return;
+    points.push({ ...fixture.point, label: `свет ${index + 1}` });
+  });
+
+  sketch.obstacles.forEach((obstacle, index) => {
+    if (target.kind === 'obstacle' && obstacle.id === target.id) return;
+    points.push({ ...obstacle.point, label: `труба ${index + 1}` });
+  });
+
+  sketch.linearFeatures.forEach((feature, index) => {
+    if (!(target.kind === 'linear' && feature.id === target.id && target.endpoint === 'start')) {
+      points.push({ ...feature.start, label: `линия ${index + 1}` });
+    }
+
+    if (!(target.kind === 'linear' && feature.id === target.id && target.endpoint === 'end')) {
+      points.push({ ...feature.end, label: `линия ${index + 1}` });
+    }
+  });
+
+  return points;
+}
+
+function snapPoint(
+  sketch: CeilingSketch,
+  rawPoint: CeilingSketchPointRef,
+  target: DragTarget
+): { point: CeilingSketchPointRef; guides: SnapGuide[] } {
+  const snapped = {
+    xMm: roundToStep(rawPoint.xMm, GRID_STEP_MM),
+    yMm: roundToStep(rawPoint.yMm, GRID_STEP_MM),
+  };
+  const guides: SnapGuide[] = [];
+
+  collectSnapPoints(sketch, target).forEach((point) => {
+    if (Math.abs(point.xMm - snapped.xMm) <= SNAP_DISTANCE_MM) {
+      snapped.xMm = point.xMm;
+      guides.push({ axis: 'x', value: point.xMm, label: `X: ${point.label}` });
+    }
+
+    if (Math.abs(point.yMm - snapped.yMm) <= SNAP_DISTANCE_MM) {
+      snapped.yMm = point.yMm;
+      guides.push({ axis: 'y', value: point.yMm, label: `Y: ${point.label}` });
+    }
+  });
+
+  if (target.kind === 'corner') {
+    const currentIndex = sketch.points.findIndex((point) => point.id === target.id);
+
+    if (currentIndex !== -1) {
+      const previous = sketch.points[(currentIndex - 1 + sketch.points.length) % sketch.points.length];
+      const next = sketch.points[(currentIndex + 1) % sketch.points.length];
+
+      [previous, next].forEach((point, index) => {
+        const label = index === 0 ? 'соседний угол' : 'следующий угол';
+
+        if (Math.abs(point.xMm - snapped.xMm) <= SNAP_DISTANCE_MM * 1.25) {
+          snapped.xMm = point.xMm;
+          guides.push({ axis: 'x', value: point.xMm, label: `вертикаль: ${label}` });
+        }
+
+        if (Math.abs(point.yMm - snapped.yMm) <= SNAP_DISTANCE_MM * 1.25) {
+          snapped.yMm = point.yMm;
+          guides.push({ axis: 'y', value: point.yMm, label: `горизонталь: ${label}` });
+        }
+      });
+    }
+  }
+
+  return {
+    point: snapped,
+    guides: guides.slice(-3),
+  };
+}
+
 export default function CeilingSketcher({ value, onChange }: CeilingSketcherProps) {
   const svgRef = useRef<SVGSVGElement | null>(null);
   const [dragTarget, setDragTarget] = useState<DragTarget | null>(null);
   const [selectedObjectId, setSelectedObjectId] = useState('');
-  const [viewMode, setViewMode] = useState<'plan' | 'preview'>('plan');
+  const [frozenViewBox, setFrozenViewBox] = useState<ViewBoxState | null>(null);
+  const [snapGuides, setSnapGuides] = useState<SnapGuide[]>([]);
 
   const bounds = useMemo(() => sketchBounds(value), [value]);
   const metrics = useMemo(() => calculateCeilingSketchMetrics(value), [value]);
   const walls = useMemo(() => wallLengthsMm(value), [value]);
-  const padding = Math.max(650, Math.min(bounds.width, bounds.height) * 0.18);
-  const viewBox = `${bounds.minX - padding} ${bounds.minY - padding} ${bounds.width + padding * 2} ${bounds.height + padding * 2}`;
+  const padding = Math.max(900, Math.min(bounds.width, bounds.height) * 0.22);
+  const liveViewBox = useMemo<ViewBoxState>(() => ({
+    x: bounds.minX - padding,
+    y: bounds.minY - padding,
+    width: bounds.width + padding * 2,
+    height: bounds.height + padding * 2,
+  }), [bounds, padding]);
+  const activeViewBox = frozenViewBox || liveViewBox;
+  const selectedPoint = selectedPointOf(value, selectedObjectId);
 
   function emit(nextSketch: CeilingSketch) {
     onChange(nextSketch, calculateCeilingSketchMetrics(nextSketch));
@@ -107,51 +235,58 @@ export default function CeilingSketcher({ value, onChange }: CeilingSketcherProp
     const svg = svgRef.current;
     if (!svg) return { xMm: 0, yMm: 0 };
 
-    const point = svg.createSVGPoint();
-    point.x = event.clientX;
-    point.y = event.clientY;
-    const matrix = svg.getScreenCTM()?.inverse();
-    const transformed = matrix ? point.matrixTransform(matrix) : point;
+    const rect = svg.getBoundingClientRect();
+    const relativeX = (event.clientX - rect.left) / Math.max(1, rect.width);
+    const relativeY = (event.clientY - rect.top) / Math.max(1, rect.height);
 
     return {
-      xMm: Math.round(transformed.x / 10) * 10,
-      yMm: Math.round(transformed.y / 10) * 10,
+      xMm: activeViewBox.x + relativeX * activeViewBox.width,
+      yMm: activeViewBox.y + relativeY * activeViewBox.height,
     };
+  }
+
+  function updatePointLikeObject(target: DragTarget, point: CeilingSketchPointRef) {
+    if (target.kind === 'corner') {
+      emit(updateCeilingSketchPoint(value, target.id, point));
+    }
+
+    if (target.kind === 'fixture') {
+      emit(updateFixture(value, target.id, point));
+    }
+
+    if (target.kind === 'obstacle') {
+      emit(updateObstacle(value, target.id, point));
+    }
+
+    if (target.kind === 'linear') {
+      emit(updateLinearFeaturePoint(value, target.id, target.endpoint, point));
+    }
   }
 
   function handlePointerMove(event: PointerEvent<SVGSVGElement>) {
     if (!dragTarget) return;
 
     event.preventDefault();
-    const point = pointerToSketchPoint(event);
+    const rawPoint = pointerToSketchPoint(event);
+    const snapped = snapPoint(value, rawPoint, dragTarget);
+    setSnapGuides(snapped.guides);
+    updatePointLikeObject(dragTarget, snapped.point);
+  }
 
-    if (dragTarget.kind === 'corner') {
-      emit(updateCeilingSketchPoint(value, dragTarget.id, point));
-    }
-
-    if (dragTarget.kind === 'fixture') {
-      emit(updateFixture(value, dragTarget.id, point));
-    }
-
-    if (dragTarget.kind === 'obstacle') {
-      emit(updateObstacle(value, dragTarget.id, point));
-    }
-
-    if (dragTarget.kind === 'linear') {
-      emit(updateLinearFeaturePoint(value, dragTarget.id, dragTarget.endpoint, point));
-    }
+  function finishDrag() {
+    setDragTarget(null);
+    setFrozenViewBox(null);
+    setSnapGuides([]);
   }
 
   function startDrag(event: PointerEvent<SVGElement>, target: DragTarget) {
     event.preventDefault();
     event.stopPropagation();
+    setFrozenViewBox(activeViewBox);
     setDragTarget(target);
     setSelectedObjectId(target.id);
+    setSnapGuides([]);
     event.currentTarget.setPointerCapture(event.pointerId);
-  }
-
-  function selectedCanBeRemoved() {
-    return Boolean(selectedObjectId);
   }
 
   function removeSelected() {
@@ -166,225 +301,63 @@ export default function CeilingSketcher({ value, onChange }: CeilingSketcherProp
     emit(nextSketch);
   }
 
-  function renderPlan() {
-    const polygonPoints = sketchPointList(value.points);
+  function updateSelectedPoint(axis: 'xMm' | 'yMm', nextValue: number) {
+    if (!selectedPoint) return;
+
+    const nextPoint = {
+      ...selectedPoint,
+      [axis]: roundToStep(Number(nextValue || 0), 10),
+    };
+    const corner = value.points.find((point) => point.id === selectedObjectId);
+    const fixture = value.fixtures.find((item) => item.id === selectedObjectId);
+    const obstacle = value.obstacles.find((item) => item.id === selectedObjectId);
+
+    if (corner) emit(updateCeilingSketchPoint(value, selectedObjectId, nextPoint));
+    if (fixture) emit(updateFixture(value, selectedObjectId, nextPoint));
+    if (obstacle) emit(updateObstacle(value, selectedObjectId, nextPoint));
+  }
+
+  function renderHandle(target: DragTarget, point: CeilingSketchPointRef, color: string, label?: string) {
+    const selected = selectedObjectId === target.id;
 
     return (
-      <svg
-        ref={svgRef}
-        viewBox={viewBox}
-        role="img"
-        aria-label="Чертеж потолка"
-        onPointerMove={handlePointerMove}
-        onPointerUp={() => setDragTarget(null)}
-        onPointerCancel={() => setDragTarget(null)}
-        style={{
-          width: '100%',
-          height: '100%',
-          display: 'block',
-          touchAction: 'none',
-          background: '#F8FAFC',
-        }}
-      >
-        <defs>
-          <pattern id="ceiling-grid" width="500" height="500" patternUnits="userSpaceOnUse">
-            <path d="M 500 0 L 0 0 0 500" fill="none" stroke="#CBD5E1" strokeWidth="1" />
-          </pattern>
-          <pattern id="fabric-lines" width="240" height="240" patternUnits="userSpaceOnUse" patternTransform={`rotate(${value.fabric.directionDeg})`}>
-            <path d="M 0 0 L 0 240" fill="none" stroke="#93C5FD" strokeWidth="2" opacity="0.55" />
-          </pattern>
-        </defs>
-
-        <rect x={bounds.minX - padding} y={bounds.minY - padding} width={bounds.width + padding * 2} height={bounds.height + padding * 2} fill="url(#ceiling-grid)" />
-        <polygon points={polygonPoints} fill="#DBEAFE" stroke="#0F172A" strokeWidth="4" vectorEffect="non-scaling-stroke" />
-        <polygon points={polygonPoints} fill="url(#fabric-lines)" opacity="0.55" />
-
-        {value.levels.map((level) => (
-          <polygon
-            key={level.id}
-            points={sketchPointList(level.points)}
-            fill="rgba(245, 158, 11, 0.12)"
-            stroke="#B45309"
-            strokeWidth="4"
-            strokeDasharray="16 12"
-            vectorEffect="non-scaling-stroke"
-            onPointerDown={(event) => {
-              event.stopPropagation();
-              setSelectedObjectId(level.id);
-            }}
-          />
-        ))}
-
-        {value.fabric.seams.map((seam) => (
-          <line
-            key={seam.id}
-            x1={seam.start.xMm}
-            y1={seam.start.yMm}
-            x2={seam.end.xMm}
-            y2={seam.end.yMm}
-            stroke="#7C3AED"
-            strokeWidth="4"
-            strokeDasharray="18 14"
-            vectorEffect="non-scaling-stroke"
-            onPointerDown={(event) => {
-              event.stopPropagation();
-              setSelectedObjectId(seam.id);
-            }}
-          />
-        ))}
-
-        {value.linearFeatures.map((feature) => {
-          const color = feature.kind === 'light_line'
-            ? '#F59E0B'
-            : feature.kind === 'curtain_track'
-              ? '#0EA5E9'
-              : '#10B981';
-
-          return (
-            <g key={feature.id}>
-              <line
-                x1={feature.start.xMm}
-                y1={feature.start.yMm}
-                x2={feature.end.xMm}
-                y2={feature.end.yMm}
-                stroke={color}
-                strokeWidth="8"
-                strokeLinecap="round"
-                vectorEffect="non-scaling-stroke"
-                onPointerDown={(event) => {
-                  event.stopPropagation();
-                  setSelectedObjectId(feature.id);
-                }}
-              />
-              <circle
-                cx={feature.start.xMm}
-                cy={feature.start.yMm}
-                r="110"
-                fill="#FFFFFF"
-                stroke={color}
-                strokeWidth="4"
-                vectorEffect="non-scaling-stroke"
-                onPointerDown={(event) => startDrag(event, { kind: 'linear', id: feature.id, endpoint: 'start' })}
-              />
-              <circle
-                cx={feature.end.xMm}
-                cy={feature.end.yMm}
-                r="110"
-                fill="#FFFFFF"
-                stroke={color}
-                strokeWidth="4"
-                vectorEffect="non-scaling-stroke"
-                onPointerDown={(event) => startDrag(event, { kind: 'linear', id: feature.id, endpoint: 'end' })}
-              />
-            </g>
-          );
-        })}
-
-        {value.obstacles.map((obstacle) => (
-          <g key={obstacle.id} onPointerDown={(event) => startDrag(event, { kind: 'obstacle', id: obstacle.id })}>
-            <circle
-              cx={obstacle.point.xMm}
-              cy={obstacle.point.yMm}
-              r={Math.max(120, obstacle.diameterMm / 2)}
-              fill={selectedObjectId === obstacle.id ? '#FEE2E2' : '#FFFFFF'}
-              stroke="#DC2626"
-              strokeWidth="5"
-              vectorEffect="non-scaling-stroke"
-            />
-            <circle cx={obstacle.point.xMm} cy={obstacle.point.yMm} r="24" fill="#DC2626" />
-          </g>
-        ))}
-
-        {value.fixtures.map((fixture) => (
-          <g key={fixture.id} onPointerDown={(event) => startDrag(event, { kind: 'fixture', id: fixture.id })}>
-            <circle
-              cx={fixture.point.xMm}
-              cy={fixture.point.yMm}
-              r={Math.max(105, fixture.diameterMm / 2)}
-              fill={selectedObjectId === fixture.id ? '#FEF3C7' : '#FFFFFF'}
-              stroke="#F59E0B"
-              strokeWidth="5"
-              vectorEffect="non-scaling-stroke"
-            />
-            <path
-              d={`M ${fixture.point.xMm - 55} ${fixture.point.yMm} L ${fixture.point.xMm + 55} ${fixture.point.yMm} M ${fixture.point.xMm} ${fixture.point.yMm - 55} L ${fixture.point.xMm} ${fixture.point.yMm + 55}`}
-              stroke="#F59E0B"
-              strokeWidth="4"
-              vectorEffect="non-scaling-stroke"
-            />
-          </g>
-        ))}
-
-        {value.points.map((sketchPoint, index) => (
-          <g key={sketchPoint.id}>
-            <circle
-              cx={sketchPoint.xMm}
-              cy={sketchPoint.yMm}
-              r="135"
-              fill={selectedObjectId === sketchPoint.id ? '#1D4ED8' : '#FFFFFF'}
-              stroke="#1D4ED8"
-              strokeWidth="5"
-              vectorEffect="non-scaling-stroke"
-              onPointerDown={(event) => startDrag(event, { kind: 'corner', id: sketchPoint.id })}
-            />
-            <text
-              x={sketchPoint.xMm}
-              y={sketchPoint.yMm + 34}
-              textAnchor="middle"
-              fontSize="120"
-              fontWeight="800"
-              fill={selectedObjectId === sketchPoint.id ? '#FFFFFF' : '#1D4ED8'}
-              pointerEvents="none"
-            >
-              {index + 1}
-            </text>
-          </g>
-        ))}
-      </svg>
+      <g key={`${target.kind}-${target.id}-${'endpoint' in target ? target.endpoint : 'point'}`}>
+        <circle
+          cx={point.xMm}
+          cy={point.yMm}
+          r="430"
+          fill="transparent"
+          onPointerDown={(event) => startDrag(event, target)}
+          style={{ cursor: 'grab' }}
+        />
+        <circle
+          cx={point.xMm}
+          cy={point.yMm}
+          r="185"
+          fill={selected ? color : '#FFFFFF'}
+          stroke={color}
+          strokeWidth="5"
+          vectorEffect="non-scaling-stroke"
+          pointerEvents="none"
+        />
+        {label && (
+          <text
+            x={point.xMm}
+            y={point.yMm + 42}
+            textAnchor="middle"
+            fontSize="130"
+            fontWeight="800"
+            fill={selected ? '#FFFFFF' : color}
+            pointerEvents="none"
+          >
+            {label}
+          </text>
+        )}
+      </g>
     );
   }
 
-  function renderPreview() {
-    const offsetX = Math.max(280, bounds.width * 0.1);
-    const offsetY = Math.max(220, bounds.height * 0.1);
-    const topPoints = value.points.map((point) => ({ xMm: point.xMm + offsetX, yMm: point.yMm - offsetY }));
-    const sidePaths = value.points.map((point, index) => {
-      const next = value.points[(index + 1) % value.points.length];
-      const top = topPoints[index];
-      const nextTop = topPoints[(index + 1) % topPoints.length];
-      return `${point.xMm},${point.yMm} ${next.xMm},${next.yMm} ${nextTop.xMm},${nextTop.yMm} ${top.xMm},${top.yMm}`;
-    });
-
-    return (
-      <svg
-        viewBox={`${bounds.minX - padding} ${bounds.minY - padding - offsetY} ${bounds.width + padding * 2 + offsetX} ${bounds.height + padding * 2 + offsetY}`}
-        role="img"
-        aria-label="3D предпросмотр потолка"
-        style={{
-          width: '100%',
-          height: '100%',
-          display: 'block',
-          background: '#EFF6FF',
-        }}
-      >
-        {sidePaths.map((path, index) => (
-          <polygon key={index} points={path} fill={index % 2 === 0 ? '#BFDBFE' : '#93C5FD'} stroke="#2563EB" strokeWidth="3" vectorEffect="non-scaling-stroke" />
-        ))}
-        <polygon points={sketchPointList(topPoints)} fill="#F8FAFC" stroke="#0F172A" strokeWidth="4" vectorEffect="non-scaling-stroke" />
-        {value.levels.map((level) => (
-          <polygon
-            key={level.id}
-            points={sketchPointList(level.points.map((point) => ({ xMm: point.xMm + offsetX * 0.95, yMm: point.yMm - offsetY * 0.95 })))}
-            fill="rgba(245, 158, 11, 0.15)"
-            stroke="#B45309"
-            strokeWidth="4"
-            strokeDasharray="16 12"
-            vectorEffect="non-scaling-stroke"
-          />
-        ))}
-      </svg>
-    );
-  }
+  const polygonPoints = sketchPointList(value.points);
 
   return (
     <Box
@@ -396,15 +369,12 @@ export default function CeilingSketcher({ value, onChange }: CeilingSketcherProp
         bgcolor: 'background.paper',
       }}
     >
-      <Stack
-        direction={{ xs: 'column', lg: 'row' }}
-        sx={{ minHeight: { xs: 680, lg: 560 } }}
-      >
+      <Stack direction={{ xs: 'column', lg: 'row' }} sx={{ minHeight: { xs: 720, lg: 600 } }}>
         <Box sx={{ flexGrow: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
           <Stack
-            direction="row"
+            direction={{ xs: 'column', md: 'row' }}
             sx={{
-              alignItems: 'center',
+              alignItems: { md: 'center' },
               justifyContent: 'space-between',
               gap: 1,
               p: 1,
@@ -412,36 +382,197 @@ export default function CeilingSketcher({ value, onChange }: CeilingSketcherProp
               borderColor: 'divider',
             }}
           >
-            <ButtonGroup size="large" variant="outlined">
-              <Button
-                variant={viewMode === 'plan' ? 'contained' : 'outlined'}
-                startIcon={<ArchitectureIcon />}
-                onClick={() => setViewMode('plan')}
-              >
-                План
-              </Button>
-              <Button
-                variant={viewMode === 'preview' ? 'contained' : 'outlined'}
-                startIcon={<ViewInArIcon />}
-                onClick={() => setViewMode('preview')}
-              >
-                3D
-              </Button>
-            </ButtonGroup>
-
-            <Stack direction="row" spacing={1} sx={{ display: { xs: 'none', md: 'flex' } }}>
+            <Stack direction="row" spacing={1} sx={{ flexWrap: 'wrap', gap: 1 }}>
               <Chip color="primary" label={`${metrics.areaM2} м²`} />
               <Chip label={`${metrics.perimeterM} м`} />
               <Chip label={`${metrics.corners} угл.`} />
+              <Chip label="Сетка 50 мм" />
+              <Chip label="X/Y привязки" />
+            </Stack>
+
+            <Stack direction="row" spacing={1} sx={{ flexWrap: 'wrap', gap: 1 }}>
+              {snapGuides.map((guide) => (
+                <Chip key={`${guide.axis}-${guide.value}-${guide.label}`} color="success" label={guide.label} />
+              ))}
             </Stack>
           </Stack>
 
-          <Box sx={{ flexGrow: 1, minHeight: { xs: 360, md: 460 } }}>
-            {viewMode === 'plan' ? renderPlan() : renderPreview()}
+          <Box sx={{ flexGrow: 1, minHeight: { xs: 430, md: 520 } }}>
+            <svg
+              ref={svgRef}
+              viewBox={viewBoxString(activeViewBox)}
+              role="img"
+              aria-label="Чертеж потолка"
+              onPointerMove={handlePointerMove}
+              onPointerUp={finishDrag}
+              onPointerCancel={finishDrag}
+              style={{
+                width: '100%',
+                height: '100%',
+                display: 'block',
+                touchAction: 'none',
+                background: '#F8FAFC',
+              }}
+            >
+              <defs>
+                <pattern id="ceiling-grid-small" width="250" height="250" patternUnits="userSpaceOnUse">
+                  <path d="M 250 0 L 0 0 0 250" fill="none" stroke="#E2E8F0" strokeWidth="1" />
+                </pattern>
+                <pattern id="ceiling-grid-large" width="1000" height="1000" patternUnits="userSpaceOnUse">
+                  <path d="M 1000 0 L 0 0 0 1000" fill="none" stroke="#94A3B8" strokeWidth="2" />
+                </pattern>
+                <pattern id="fabric-lines" width="260" height="260" patternUnits="userSpaceOnUse" patternTransform={`rotate(${value.fabric.directionDeg})`}>
+                  <path d="M 0 0 L 0 260" fill="none" stroke="#60A5FA" strokeWidth="2" opacity="0.5" />
+                </pattern>
+              </defs>
+
+              <rect x={activeViewBox.x} y={activeViewBox.y} width={activeViewBox.width} height={activeViewBox.height} fill="url(#ceiling-grid-small)" />
+              <rect x={activeViewBox.x} y={activeViewBox.y} width={activeViewBox.width} height={activeViewBox.height} fill="url(#ceiling-grid-large)" />
+
+              {snapGuides.map((guide) => (
+                guide.axis === 'x'
+                  ? (
+                    <line
+                      key={`${guide.axis}-${guide.value}-${guide.label}`}
+                      x1={guide.value}
+                      y1={activeViewBox.y}
+                      x2={guide.value}
+                      y2={activeViewBox.y + activeViewBox.height}
+                      stroke="#16A34A"
+                      strokeWidth="4"
+                      strokeDasharray="22 14"
+                      vectorEffect="non-scaling-stroke"
+                    />
+                  )
+                  : (
+                    <line
+                      key={`${guide.axis}-${guide.value}-${guide.label}`}
+                      x1={activeViewBox.x}
+                      y1={guide.value}
+                      x2={activeViewBox.x + activeViewBox.width}
+                      y2={guide.value}
+                      stroke="#16A34A"
+                      strokeWidth="4"
+                      strokeDasharray="22 14"
+                      vectorEffect="non-scaling-stroke"
+                    />
+                  )
+              ))}
+
+              <polygon points={polygonPoints} fill="#DBEAFE" stroke="#0F172A" strokeWidth="5" vectorEffect="non-scaling-stroke" />
+              <polygon points={polygonPoints} fill="url(#fabric-lines)" opacity="0.45" />
+
+              {value.levels.map((level) => (
+                <polygon
+                  key={level.id}
+                  points={sketchPointList(level.points)}
+                  fill="rgba(245, 158, 11, 0.12)"
+                  stroke="#B45309"
+                  strokeWidth="5"
+                  strokeDasharray="20 12"
+                  vectorEffect="non-scaling-stroke"
+                  onPointerDown={(event) => {
+                    event.stopPropagation();
+                    setSelectedObjectId(level.id);
+                  }}
+                />
+              ))}
+
+              {value.fabric.seams.map((seam) => (
+                <line
+                  key={seam.id}
+                  x1={seam.start.xMm}
+                  y1={seam.start.yMm}
+                  x2={seam.end.xMm}
+                  y2={seam.end.yMm}
+                  stroke="#7C3AED"
+                  strokeWidth="5"
+                  strokeDasharray="18 14"
+                  vectorEffect="non-scaling-stroke"
+                  onPointerDown={(event) => {
+                    event.stopPropagation();
+                    setSelectedObjectId(seam.id);
+                  }}
+                />
+              ))}
+
+              {value.linearFeatures.map((feature: CeilingSketchLinearFeature) => {
+                const color = feature.kind === 'light_line'
+                  ? '#F59E0B'
+                  : feature.kind === 'curtain_track'
+                    ? '#0EA5E9'
+                    : '#10B981';
+
+                return (
+                  <g key={feature.id}>
+                    <line
+                      x1={feature.start.xMm}
+                      y1={feature.start.yMm}
+                      x2={feature.end.xMm}
+                      y2={feature.end.yMm}
+                      stroke={color}
+                      strokeWidth="9"
+                      strokeLinecap="round"
+                      vectorEffect="non-scaling-stroke"
+                      onPointerDown={(event) => {
+                        event.stopPropagation();
+                        setSelectedObjectId(feature.id);
+                      }}
+                    />
+                    {renderHandle({ kind: 'linear', id: feature.id, endpoint: 'start' }, feature.start, color)}
+                    {renderHandle({ kind: 'linear', id: feature.id, endpoint: 'end' }, feature.end, color)}
+                  </g>
+                );
+              })}
+
+              {value.obstacles.map((obstacle: CeilingSketchObstacle) => (
+                <g key={obstacle.id}>
+                  <circle
+                    cx={obstacle.point.xMm}
+                    cy={obstacle.point.yMm}
+                    r={Math.max(150, obstacle.diameterMm / 2)}
+                    fill={selectedObjectId === obstacle.id ? '#FEE2E2' : '#FFFFFF'}
+                    stroke="#DC2626"
+                    strokeWidth="6"
+                    vectorEffect="non-scaling-stroke"
+                    pointerEvents="none"
+                  />
+                  <circle cx={obstacle.point.xMm} cy={obstacle.point.yMm} r="28" fill="#DC2626" pointerEvents="none" />
+                  {renderHandle({ kind: 'obstacle', id: obstacle.id }, obstacle.point, '#DC2626')}
+                </g>
+              ))}
+
+              {value.fixtures.map((fixture: CeilingSketchFixture) => (
+                <g key={fixture.id}>
+                  <circle
+                    cx={fixture.point.xMm}
+                    cy={fixture.point.yMm}
+                    r={Math.max(130, fixture.diameterMm / 2)}
+                    fill={selectedObjectId === fixture.id ? '#FEF3C7' : '#FFFFFF'}
+                    stroke="#F59E0B"
+                    strokeWidth="6"
+                    vectorEffect="non-scaling-stroke"
+                    pointerEvents="none"
+                  />
+                  <path
+                    d={`M ${fixture.point.xMm - 65} ${fixture.point.yMm} L ${fixture.point.xMm + 65} ${fixture.point.yMm} M ${fixture.point.xMm} ${fixture.point.yMm - 65} L ${fixture.point.xMm} ${fixture.point.yMm + 65}`}
+                    stroke="#F59E0B"
+                    strokeWidth="5"
+                    vectorEffect="non-scaling-stroke"
+                    pointerEvents="none"
+                  />
+                  {renderHandle({ kind: 'fixture', id: fixture.id }, fixture.point, '#F59E0B')}
+                </g>
+              ))}
+
+              {value.points.map((sketchPoint, index) => (
+                renderHandle({ kind: 'corner', id: sketchPoint.id }, sketchPoint, '#1D4ED8', String(index + 1))
+              ))}
+            </svg>
           </Box>
         </Box>
 
-        <Box sx={{ width: { xs: '100%', lg: 380 }, borderLeft: { lg: '1px solid' }, borderTop: { xs: '1px solid', lg: 0 }, borderColor: 'divider', p: 1.5 }}>
+        <Box sx={{ width: { xs: '100%', lg: 390 }, borderLeft: { lg: '1px solid' }, borderTop: { xs: '1px solid', lg: 0 }, borderColor: 'divider', p: 1.5 }}>
           <Stack spacing={1.5}>
             <Stack direction="row" spacing={1} sx={{ flexWrap: 'wrap', gap: 1 }}>
               <Chip color="primary" label={`${metrics.areaM2} м²`} />
@@ -471,6 +602,27 @@ export default function CeilingSketcher({ value, onChange }: CeilingSketcherProp
               />
             </Stack>
 
+            {selectedPoint && (
+              <Stack direction="row" spacing={1}>
+                <TextField
+                  size="small"
+                  label="X, мм"
+                  type="number"
+                  value={Math.round(selectedPoint.xMm)}
+                  onChange={(event) => updateSelectedPoint('xMm', Number(event.target.value))}
+                  fullWidth
+                />
+                <TextField
+                  size="small"
+                  label="Y, мм"
+                  type="number"
+                  value={Math.round(selectedPoint.yMm)}
+                  onChange={(event) => updateSelectedPoint('yMm', Number(event.target.value))}
+                  fullWidth
+                />
+              </Stack>
+            )}
+
             <Stack direction="row" spacing={1} sx={{ flexWrap: 'wrap', gap: 1 }}>
               <Button size="large" variant="outlined" startIcon={<AddIcon />} onClick={() => emit(addCeilingCorner(value))}>
                 Угол
@@ -499,7 +651,7 @@ export default function CeilingSketcher({ value, onChange }: CeilingSketcherProp
               color="error"
               variant="outlined"
               startIcon={<DeleteIcon />}
-              disabled={!selectedCanBeRemoved()}
+              disabled={!selectedObjectId}
               onClick={removeSelected}
               sx={{ minHeight: 48 }}
             >
@@ -518,7 +670,7 @@ export default function CeilingSketcher({ value, onChange }: CeilingSketcherProp
                   type="number"
                   value={wall.lengthMm}
                   onChange={(event) => emit(setCeilingWallLength(value, wall.startIndex, Number(event.target.value)))}
-                  sx={{ width: 154 }}
+                  sx={{ width: 158 }}
                 />
               ))}
             </Stack>
@@ -559,7 +711,7 @@ export default function CeilingSketcher({ value, onChange }: CeilingSketcherProp
             <Divider />
 
             <Typography variant="subtitle2">Объекты</Typography>
-            <Stack spacing={0.75} sx={{ maxHeight: 180, overflow: 'auto' }}>
+            <Stack spacing={0.75} sx={{ maxHeight: 190, overflow: 'auto' }}>
               {value.linearFeatures.map((feature) => (
                 <Chip
                   key={feature.id}
