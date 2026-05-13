@@ -7,10 +7,97 @@ export type EstimateCalculationMetric =
   | 'perimeter'
   | 'corners'
   | 'light_points'
+  | 'light_lines'
   | 'pipes'
   | 'curtain_tracks'
   | 'niches'
+  | 'levels'
+  | 'seams'
   | 'fixed';
+
+export type CeilingFixtureKind = 'spot' | 'chandelier' | 'vent' | 'sensor';
+export type CeilingObstacleKind = 'pipe' | 'riser' | 'column' | 'hood';
+export type CeilingLinearFeatureKind = 'light_line' | 'curtain_track' | 'niche' | 'profile' | 'level_edge';
+export type CeilingFabricTexture = 'matte' | 'satin' | 'gloss' | 'fabric';
+
+export interface CeilingSketchPointRef {
+  xMm: number;
+  yMm: number;
+}
+
+export interface CeilingSketchPoint extends CeilingSketchPointRef {
+  id: string;
+}
+
+export interface CeilingSketchFixture {
+  id: string;
+  kind: CeilingFixtureKind;
+  point: CeilingSketchPointRef;
+  diameterMm: number;
+}
+
+export interface CeilingSketchObstacle {
+  id: string;
+  kind: CeilingObstacleKind;
+  point: CeilingSketchPointRef;
+  diameterMm: number;
+  widthMm?: number;
+  depthMm?: number;
+  clearanceMm: number;
+}
+
+export interface CeilingSketchLinearFeature {
+  id: string;
+  kind: CeilingLinearFeatureKind;
+  start: CeilingSketchPointRef;
+  end: CeilingSketchPointRef;
+  widthMm: number;
+}
+
+export interface CeilingSketchLevel {
+  id: string;
+  name: string;
+  elevationMm: number;
+  insetMm: number;
+  points: CeilingSketchPoint[];
+}
+
+export interface CeilingFabricSeam {
+  id: string;
+  start: CeilingSketchPointRef;
+  end: CeilingSketchPointRef;
+}
+
+export interface CeilingFabricPlan {
+  texture: CeilingFabricTexture;
+  rollWidthMm: number;
+  directionDeg: number;
+  seams: CeilingFabricSeam[];
+}
+
+export interface CeilingSketch {
+  version: 1;
+  points: CeilingSketchPoint[];
+  levels: CeilingSketchLevel[];
+  fixtures: CeilingSketchFixture[];
+  obstacles: CeilingSketchObstacle[];
+  linearFeatures: CeilingSketchLinearFeature[];
+  fabric: CeilingFabricPlan;
+  updatedAt?: string;
+}
+
+export interface CeilingSketchMetrics {
+  areaM2: number;
+  perimeterM: number;
+  corners: number;
+  lightPoints: number;
+  lightLinesM: number;
+  pipes: number;
+  curtainTracksM: number;
+  nichesM: number;
+  levels: number;
+  seamsM: number;
+}
 
 export interface CatalogItem {
   id: string;
@@ -149,6 +236,7 @@ export interface EstimateRoomDraft {
   curtainTracks: string;
   niches: string;
   comment: string;
+  ceilingSketch?: CeilingSketch;
 }
 
 export interface EstimateSaveDraft {
@@ -187,6 +275,17 @@ export interface EstimateCalculationRule {
 
 export interface EstimateSettingsSnapshot {
   calculation_rules?: EstimateCalculationRule[];
+  ceiling_project?: {
+    version: 1;
+    source: 'ceiling_sketcher';
+    rooms: Array<{
+      room_id: string;
+      room_name: string;
+      sketch: CeilingSketch;
+      metrics: CeilingSketchMetrics;
+    }>;
+    updated_at: string;
+  } | null;
   [key: string]: unknown;
 }
 

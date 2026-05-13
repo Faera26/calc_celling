@@ -24,6 +24,8 @@ import {
 import { Add as AddIcon, Delete as DeleteIcon } from '@mui/icons-material';
 import type {
   CartRow,
+  CeilingSketch,
+  CeilingSketchMetrics,
   CompanySettings,
   EstimateDocumentType,
   EstimateCalculationMetric,
@@ -40,6 +42,11 @@ import {
 import { supabase } from '../supabaseClient';
 import { cleanSearch, money } from '../utils';
 import PdfColorPalette from './PdfColorPalette';
+import CeilingSketcher from './CeilingSketcher';
+import {
+  createDefaultCeilingSketch,
+  formatSketchNumber,
+} from '../features/ceilingSketch/ceilingSketch';
 
 interface RuleCatalogOption {
   id: string;
@@ -77,6 +84,7 @@ function emptyRoom(index: number): EstimateRoomDraft {
     curtainTracks: '',
     niches: '',
     comment: '',
+    ceilingSketch: createDefaultCeilingSketch(),
   };
 }
 
@@ -102,9 +110,12 @@ function metricLabel(metric: EstimateCalculationMetric) {
   if (metric === 'perimeter') return 'периметру';
   if (metric === 'corners') return 'углам';
   if (metric === 'light_points') return 'светильникам';
+  if (metric === 'light_lines') return 'световым линиям';
   if (metric === 'pipes') return 'трубам';
   if (metric === 'curtain_tracks') return 'карнизам';
   if (metric === 'niches') return 'нишам';
+  if (metric === 'levels') return 'дополнительным уровням';
+  if (metric === 'seams') return 'швам полотна';
   return 'фиксированному количеству';
 }
 
@@ -218,6 +229,19 @@ export default function SaveEstimateDialog({
       ...prev,
       rooms: prev.rooms.map((room) => room.id === roomId ? { ...room, ...patch } : room),
     }));
+  }
+
+  function updateRoomSketch(roomId: string, sketch: CeilingSketch, metrics: CeilingSketchMetrics) {
+    updateRoom(roomId, {
+      ceilingSketch: sketch,
+      area: formatSketchNumber(metrics.areaM2),
+      perimeter: formatSketchNumber(metrics.perimeterM),
+      corners: String(metrics.corners),
+      lightPoints: String(metrics.lightPoints),
+      pipes: String(metrics.pipes),
+      curtainTracks: formatSketchNumber(metrics.curtainTracksM),
+      niches: formatSketchNumber(metrics.nichesM),
+    });
   }
 
   function addRoom() {
@@ -373,6 +397,15 @@ export default function SaveEstimateDialog({
                     <DeleteIcon />
                   </IconButton>
                 </Stack>
+
+                <CeilingSketcher
+                  value={room.ceilingSketch || createDefaultCeilingSketch()}
+                  onChange={(sketch, metrics) => updateRoomSketch(room.id, sketch, metrics)}
+                />
+
+                <Typography variant="subtitle2" sx={{ mt: 2, mb: 1 }}>
+                  Метрики для калькулятора
+                </Typography>
 
                 <Stack direction={{ xs: 'column', md: 'row' }} spacing={2} sx={{ mb: 2 }}>
                   <TextField label="Название" value={room.name} onChange={(event) => updateRoom(room.id, { name: event.target.value })} fullWidth />

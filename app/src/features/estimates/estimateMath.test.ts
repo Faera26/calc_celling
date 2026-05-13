@@ -50,10 +50,14 @@ describe('calculationEngine', () => {
       perimeter: 17.2,
       corners: 6,
       lightPoints: 8,
+      lightLines: 0,
       pipes: 2,
       curtainTracks: 3.5,
       niches: 1.2,
+      levels: 0,
+      seams: 0,
       comment: 'с подсветкой',
+      ceilingSketch: null,
     }]);
     expect(estimate.summary).toMatchObject({
       area: 18.5,

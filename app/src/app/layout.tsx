@@ -1,4 +1,4 @@
-import type { Metadata } from 'next';
+import type { Metadata, Viewport } from 'next';
 import { Inter } from 'next/font/google';
 import type { ReactNode } from 'react';
 import { SpeedInsights } from '@vercel/speed-insights/next';
@@ -11,8 +11,26 @@ const inter = Inter({
 });
 
 export const metadata: Metadata = {
+  applicationName: 'SmartCeiling',
   title: 'SmartCeiling',
   description: 'Калькулятор натяжных потолков с каталогом, сметами и административной панелью.',
+  manifest: '/manifest.webmanifest',
+  appleWebApp: {
+    capable: true,
+    title: 'SmartCeiling',
+    statusBarStyle: 'default',
+  },
+  icons: {
+    icon: '/favicon.svg',
+    apple: '/apple-touch-icon.png',
+  },
+};
+
+export const viewport: Viewport = {
+  width: 'device-width',
+  initialScale: 1,
+  viewportFit: 'cover',
+  themeColor: '#FFFFFF',
 };
 
 interface RootLayoutProps {

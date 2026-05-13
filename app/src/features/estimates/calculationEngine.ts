@@ -11,19 +11,27 @@ import type {
   EstimateSaveDraft,
   EstimateSourceSnapshot,
   EstimateStatus,
+  EstimateSettingsSnapshot,
   SavedEstimatePosition,
   SavedEstimateRoom,
 } from '../../types';
 import { adjustedPrice, labelOf, roundPrice } from '../../utils';
+import {
+  buildCeilingProjectSnapshot,
+  calculateCeilingSketchMetrics,
+} from '../ceilingSketch/ceilingSketch';
 
 export interface EstimateRoomMetrics {
   area: number;
   perimeter: number;
   corners: number;
   lightPoints: number;
+  lightLines: number;
   pipes: number;
   curtainTracks: number;
   niches: number;
+  levels: number;
+  seams: number;
 }
 
 export interface CalculatedEstimateRoom extends EstimateRoomMetrics {
@@ -31,6 +39,7 @@ export interface CalculatedEstimateRoom extends EstimateRoomMetrics {
   positionIndex: number;
   name: string;
   comment: string | null;
+  ceilingSketch: EstimateSaveDraft['rooms'][number]['ceilingSketch'] | null;
 }
 
 export interface CalculatedEstimatePosition {
@@ -82,6 +91,7 @@ export interface CalculatedEstimate {
     discountPercent: number;
     pdfNote: string;
     calculation_rules: EstimateCalculationRule[];
+    ceiling_project: EstimateSettingsSnapshot['ceiling_project'];
   };
 }
 
@@ -227,9 +237,12 @@ function emptyRoomMetrics(): EstimateRoomMetrics {
     perimeter: 0,
     corners: 0,
     lightPoints: 0,
+    lightLines: 0,
     pipes: 0,
     curtainTracks: 0,
     niches: 0,
+    levels: 0,
+    seams: 0,
   };
 }
 
@@ -280,6 +293,60 @@ export function createDefaultCalculationRules(): EstimateCalculationRule[] {
       description: null,
       multiplier: 1,
       round_to: 0.1,
+    },
+    {
+      id: 'rule-light-lines',
+      enabled: false,
+      label: 'Световые линии по чертежу',
+      metric: 'light_lines',
+      item_type: 'uzel',
+      search: 'световая линия',
+      item_id: '',
+      item_name: '',
+      category: 'Узлы',
+      subcategory: 'Свет',
+      unit: 'м',
+      base_price: null,
+      image: null,
+      description: null,
+      multiplier: 1,
+      round_to: 0.1,
+    },
+    {
+      id: 'rule-pipe-bypasses',
+      enabled: false,
+      label: 'Обходы труб по чертежу',
+      metric: 'pipes',
+      item_type: 'uzel',
+      search: 'обход трубы',
+      item_id: '',
+      item_name: '',
+      category: 'Узлы',
+      subcategory: 'Обходы',
+      unit: 'шт.',
+      base_price: null,
+      image: null,
+      description: null,
+      multiplier: 1,
+      round_to: 1,
+    },
+    {
+      id: 'rule-extra-levels',
+      enabled: false,
+      label: 'Дополнительные уровни',
+      metric: 'levels',
+      item_type: 'uzel',
+      search: 'уровень потолка',
+      item_id: '',
+      item_name: '',
+      category: 'Узлы',
+      subcategory: 'Многоуровневые',
+      unit: 'шт.',
+      base_price: null,
+      image: null,
+      description: null,
+      multiplier: 1,
+      round_to: 1,
     },
   ];
 }
@@ -337,6 +404,7 @@ export function calculateEstimate(input: CalculateEstimateInput): CalculatedEsti
       discountPercent: input.settings.discountPercent,
       pdfNote: input.settings.pdfNote,
       calculation_rules: calculationRules,
+      ceiling_project: buildCeilingProjectSnapshot(rooms),
     },
   };
 }
@@ -589,6 +657,8 @@ export function buildEstimatePdfItemsFromCartRows(cartRows: CartRow[], settings:
   return cartRows.map((row) => ({
     name: row.item.name,
     type: labelOf(row.type),
+    image: typeof row.item.image === 'string' ? row.item.image : null,
+    description: typeof row.item.description === 'string' ? row.item.description : null,
     qty: row.qty,
     price: row.price,
     unit: row.item.unit || 'шт.',
@@ -608,13 +678,14 @@ export function buildEstimatePdfItemsFromSavedPositions(
 ): EstimatePdfItem[] {
   return positions.map((position) => {
     const sourceSnapshot = normalizeSourceSnapshot(position.source_snapshot);
+    const itemSnapshot = normalizeItemSnapshot(position.item_snapshot, position);
 
     return {
       name: position.item_name,
       type: labelOf(position.item_type),
       section: resolveSectionName(position.room_id),
-      image: sourceSnapshot.image || null,
-      description: sourceSnapshot.description || null,
+      image: sourceSnapshot.image || itemSnapshot.image || null,
+      description: sourceSnapshot.description || itemSnapshot.description || null,
       qty: toNumber(position.qty),
       price: toNumber(position.price),
       unit: position.unit || 'шт.',
@@ -630,23 +701,33 @@ export function buildEstimatePdfItemsFromSavedPositions(
 }
 
 function normalizeEstimateRooms(rooms: EstimateSaveDraft['rooms']): CalculatedEstimateRoom[] {
-  return rooms.map((room, index) => ({
-    id: room.id,
-    positionIndex: index + 1,
-    name: normalizeText(room.name) || `Комната ${index + 1}`,
-    // Площадь нужна для материалов по квадратным метрам, например полотна.
-    area: toNumber(room.area),
-    // Периметр нужен для профилей, вставок и других работ по длине.
-    perimeter: toNumber(room.perimeter),
-    corners: toNumber(room.corners),
-    // Эти поля описывают дополнительные узлы комнаты:
-    // точки света, обходы труб, карнизы и ниши.
-    lightPoints: toNumber(room.lightPoints),
-    pipes: toNumber(room.pipes),
-    curtainTracks: toNumber(room.curtainTracks),
-    niches: toNumber(room.niches),
-    comment: normalizeText(room.comment),
-  }));
+  return rooms.map((room, index) => {
+    const sketchMetrics = room.ceilingSketch
+      ? calculateCeilingSketchMetrics(room.ceilingSketch)
+      : null;
+
+    return {
+      id: room.id,
+      positionIndex: index + 1,
+      name: normalizeText(room.name) || `Комната ${index + 1}`,
+      // Площадь нужна для материалов по квадратным метрам, например полотна.
+      area: toNumber(room.area),
+      // Периметр нужен для профилей, вставок и других работ по длине.
+      perimeter: toNumber(room.perimeter),
+      corners: toNumber(room.corners),
+      // Эти поля описывают дополнительные узлы комнаты:
+      // точки света, обходы труб, карнизы и ниши.
+      lightPoints: toNumber(room.lightPoints),
+      lightLines: sketchMetrics?.lightLinesM || 0,
+      pipes: toNumber(room.pipes),
+      curtainTracks: toNumber(room.curtainTracks),
+      niches: toNumber(room.niches),
+      levels: sketchMetrics?.levels || 0,
+      seams: sketchMetrics?.seamsM || 0,
+      comment: normalizeText(room.comment),
+      ceilingSketch: room.ceilingSketch || null,
+    };
+  });
 }
 
 function summarizeRoomMetrics(rooms: CalculatedEstimateRoom[]): EstimateRoomMetrics {
@@ -655,9 +736,12 @@ function summarizeRoomMetrics(rooms: CalculatedEstimateRoom[]): EstimateRoomMetr
     perimeter: summary.perimeter + room.perimeter,
     corners: summary.corners + room.corners,
     lightPoints: summary.lightPoints + room.lightPoints,
+    lightLines: summary.lightLines + room.lightLines,
     pipes: summary.pipes + room.pipes,
     curtainTracks: summary.curtainTracks + room.curtainTracks,
     niches: summary.niches + room.niches,
+    levels: summary.levels + room.levels,
+    seams: summary.seams + room.seams,
   }), emptyRoomMetrics());
 }
 
@@ -877,9 +961,12 @@ function normalizeMetric(metric: EstimateCalculationMetric | null | undefined): 
     || metric === 'perimeter'
     || metric === 'corners'
     || metric === 'light_points'
+    || metric === 'light_lines'
     || metric === 'pipes'
     || metric === 'curtain_tracks'
     || metric === 'niches'
+    || metric === 'levels'
+    || metric === 'seams'
     || metric === 'fixed'
   ) {
     return metric;
@@ -950,9 +1037,12 @@ function metricValueOfRoom(room: CalculatedEstimateRoom, metric: EstimateCalcula
   if (metric === 'perimeter') return room.perimeter;
   if (metric === 'corners') return room.corners;
   if (metric === 'light_points') return room.lightPoints;
+  if (metric === 'light_lines') return room.lightLines;
   if (metric === 'pipes') return room.pipes;
   if (metric === 'curtain_tracks') return room.curtainTracks;
   if (metric === 'niches') return room.niches;
+  if (metric === 'levels') return room.levels;
+  if (metric === 'seams') return room.seams;
   return 1;
 }
 
