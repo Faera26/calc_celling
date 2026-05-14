@@ -11,6 +11,13 @@ import {
   createDefaultCeilingSketch,
   resizeCeilingSketch,
   setCeilingWallLength,
+  updateCeilingLevelPoint,
+  updateFabricSeamPoint,
+  updateFixture,
+  updateFixtureDetails,
+  updateLinearFeatureDetails,
+  updateObstacle,
+  updateObstacleDetails,
 } from './ceilingSketch';
 
 describe('ceilingSketch', () => {
@@ -55,6 +62,35 @@ describe('ceilingSketch', () => {
 
     expect(metrics.perimeterM).toBeGreaterThan(15);
     expect(metrics.corners).toBe(5);
+  });
+
+  it('редактирует монтажные объекты и разделители точными координатами', () => {
+    let sketch = createDefaultCeilingSketch(5000, 4000);
+    sketch = addFixture(sketch, 'spot');
+    sketch = addObstacle(sketch, 'pipe');
+    sketch = addLinearFeature(sketch, 'light_line');
+    sketch = addCeilingLevel(sketch);
+    sketch = addFabricSeam(sketch);
+
+    const fixtureId = sketch.fixtures[0].id;
+    const obstacleId = sketch.obstacles[0].id;
+    const featureId = sketch.linearFeatures[0].id;
+    const level = sketch.levels[0];
+    const seamId = sketch.fabric.seams[0].id;
+
+    sketch = updateFixture(sketch, fixtureId, { xMm: 1200, yMm: 900 });
+    sketch = updateFixtureDetails(sketch, fixtureId, { diameterMm: 95 });
+    sketch = updateObstacle(sketch, obstacleId, { xMm: 4300, yMm: 350 });
+    sketch = updateObstacleDetails(sketch, obstacleId, { diameterMm: 130, clearanceMm: 45 });
+    sketch = updateLinearFeatureDetails(sketch, featureId, { widthMm: 75 });
+    sketch = updateCeilingLevelPoint(sketch, level.id, level.points[0].id, { xMm: 700, yMm: 650 });
+    sketch = updateFabricSeamPoint(sketch, seamId, 'start', { xMm: 1800, yMm: 0 });
+
+    expect(sketch.fixtures[0]).toMatchObject({ point: { xMm: 1200, yMm: 900 }, diameterMm: 95 });
+    expect(sketch.obstacles[0]).toMatchObject({ point: { xMm: 4300, yMm: 350 }, diameterMm: 130, clearanceMm: 45 });
+    expect(sketch.linearFeatures[0].widthMm).toBe(75);
+    expect(sketch.levels[0].points[0]).toMatchObject({ xMm: 700, yMm: 650 });
+    expect(sketch.fabric.seams[0].start).toMatchObject({ xMm: 1800, yMm: 0 });
   });
 
   it('собирает JSON проекта для snapshot сметы', () => {

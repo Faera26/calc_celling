@@ -1,6 +1,8 @@
 import type {
+  CeilingFabricSeam,
   CeilingFabricTexture,
   CeilingSketch,
+  CeilingSketchLevel,
   CeilingSketchLinearFeature,
   CeilingSketchMetrics,
   CeilingSketchObstacle,
@@ -239,6 +241,25 @@ export function updateFixture(sketch: CeilingSketch, fixtureId: string, pointPat
   };
 }
 
+export function updateFixtureDetails(
+  sketch: CeilingSketch,
+  fixtureId: string,
+  patch: Partial<Pick<CeilingSketchFixture, 'diameterMm'>>
+): CeilingSketch {
+  return {
+    ...sketch,
+    fixtures: sketch.fixtures.map((fixture) => (
+      fixture.id === fixtureId
+        ? {
+          ...fixture,
+          diameterMm: Math.max(20, Math.round(Number(patch.diameterMm ?? fixture.diameterMm))),
+        }
+        : fixture
+    )),
+    updatedAt: new Date().toISOString(),
+  };
+}
+
 export function addObstacle(sketch: CeilingSketch, kind: CeilingSketchObstacle['kind']): CeilingSketch {
   const bounds = sketchBounds(sketch);
   const obstacle: CeilingSketchObstacle = {
@@ -267,6 +288,28 @@ export function updateObstacle(sketch: CeilingSketch, obstacleId: string, pointP
     obstacles: sketch.obstacles.map((obstacle) => (
       obstacle.id === obstacleId
         ? { ...obstacle, point: { xMm: Math.round(pointPatch.xMm), yMm: Math.round(pointPatch.yMm) } }
+        : obstacle
+    )),
+    updatedAt: new Date().toISOString(),
+  };
+}
+
+export function updateObstacleDetails(
+  sketch: CeilingSketch,
+  obstacleId: string,
+  patch: Partial<Pick<CeilingSketchObstacle, 'diameterMm' | 'widthMm' | 'depthMm' | 'clearanceMm'>>
+): CeilingSketch {
+  return {
+    ...sketch,
+    obstacles: sketch.obstacles.map((obstacle) => (
+      obstacle.id === obstacleId
+        ? {
+          ...obstacle,
+          diameterMm: Math.max(20, Math.round(Number(patch.diameterMm ?? obstacle.diameterMm))),
+          widthMm: patch.widthMm === undefined ? obstacle.widthMm : Math.max(20, Math.round(Number(patch.widthMm))),
+          depthMm: patch.depthMm === undefined ? obstacle.depthMm : Math.max(20, Math.round(Number(patch.depthMm))),
+          clearanceMm: Math.max(0, Math.round(Number(patch.clearanceMm ?? obstacle.clearanceMm))),
+        }
         : obstacle
     )),
     updatedAt: new Date().toISOString(),
@@ -308,6 +351,25 @@ export function updateLinearFeaturePoint(
   };
 }
 
+export function updateLinearFeatureDetails(
+  sketch: CeilingSketch,
+  featureId: string,
+  patch: Partial<Pick<CeilingSketchLinearFeature, 'widthMm'>>
+): CeilingSketch {
+  return {
+    ...sketch,
+    linearFeatures: sketch.linearFeatures.map((feature) => (
+      feature.id === featureId
+        ? {
+          ...feature,
+          widthMm: Math.max(10, Math.round(Number(patch.widthMm ?? feature.widthMm))),
+        }
+        : feature
+    )),
+    updatedAt: new Date().toISOString(),
+  };
+}
+
 export function addCeilingLevel(sketch: CeilingSketch): CeilingSketch {
   const bounds = sketchBounds(sketch);
   const inset = Math.min(bounds.width, bounds.height) * 0.18;
@@ -333,6 +395,51 @@ export function addCeilingLevel(sketch: CeilingSketch): CeilingSketch {
   };
 }
 
+export function updateCeilingLevelPoint(
+  sketch: CeilingSketch,
+  levelId: string,
+  pointId: string,
+  pointPatch: CeilingSketchPointRef
+): CeilingSketch {
+  return {
+    ...sketch,
+    levels: sketch.levels.map((level) => (
+      level.id === levelId
+        ? {
+          ...level,
+          points: level.points.map((levelPoint) => (
+            levelPoint.id === pointId
+              ? { ...levelPoint, xMm: Math.round(pointPatch.xMm), yMm: Math.round(pointPatch.yMm) }
+              : levelPoint
+          )),
+        }
+        : level
+    )),
+    updatedAt: new Date().toISOString(),
+  };
+}
+
+export function updateCeilingLevelDetails(
+  sketch: CeilingSketch,
+  levelId: string,
+  patch: Partial<Pick<CeilingSketchLevel, 'name' | 'elevationMm' | 'insetMm'>>
+): CeilingSketch {
+  return {
+    ...sketch,
+    levels: sketch.levels.map((level) => (
+      level.id === levelId
+        ? {
+          ...level,
+          name: patch.name ?? level.name,
+          elevationMm: Math.round(Number(patch.elevationMm ?? level.elevationMm)),
+          insetMm: Math.max(0, Math.round(Number(patch.insetMm ?? level.insetMm))),
+        }
+        : level
+    )),
+    updatedAt: new Date().toISOString(),
+  };
+}
+
 export function addFabricSeam(sketch: CeilingSketch): CeilingSketch {
   const bounds = sketchBounds(sketch);
   const x = bounds.minX + bounds.width / 2;
@@ -349,6 +456,26 @@ export function addFabricSeam(sketch: CeilingSketch): CeilingSketch {
           end: { xMm: x, yMm: bounds.maxY },
         },
       ],
+    },
+    updatedAt: new Date().toISOString(),
+  };
+}
+
+export function updateFabricSeamPoint(
+  sketch: CeilingSketch,
+  seamId: string,
+  endpoint: 'start' | 'end',
+  pointPatch: CeilingSketchPointRef
+): CeilingSketch {
+  return {
+    ...sketch,
+    fabric: {
+      ...sketch.fabric,
+      seams: sketch.fabric.seams.map((seam: CeilingFabricSeam) => (
+        seam.id === seamId
+          ? { ...seam, [endpoint]: { xMm: Math.round(pointPatch.xMm), yMm: Math.round(pointPatch.yMm) } }
+          : seam
+      )),
     },
     updatedAt: new Date().toISOString(),
   };

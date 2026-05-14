@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState, type PointerEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, type PointerEvent } from 'react';
 import {
   Box,
   Button,
@@ -21,6 +21,7 @@ import {
 import type {
   CeilingFabricTexture,
   CeilingSketch,
+  CeilingSketchLevel,
   CeilingSketchFixture,
   CeilingSketchLinearFeature,
   CeilingSketchMetrics,
@@ -42,10 +43,16 @@ import {
   setCeilingWallLength,
   sketchBounds,
   updateCeilingSketchPoint,
+  updateCeilingLevelDetails,
+  updateCeilingLevelPoint,
   updateFabric,
+  updateFabricSeamPoint,
   updateFixture,
+  updateFixtureDetails,
+  updateLinearFeatureDetails,
   updateLinearFeaturePoint,
   updateObstacle,
+  updateObstacleDetails,
   wallLengthsMm,
 } from '../features/ceilingSketch/ceilingSketch';
 
@@ -53,7 +60,9 @@ type DragTarget =
   | { kind: 'corner'; id: string }
   | { kind: 'fixture'; id: string }
   | { kind: 'obstacle'; id: string }
-  | { kind: 'linear'; id: string; endpoint: 'start' | 'end' };
+  | { kind: 'linear'; id: string; endpoint: 'start' | 'end' }
+  | { kind: 'level'; id: string; pointId: string }
+  | { kind: 'seam'; id: string; endpoint: 'start' | 'end' };
 
 interface ViewBoxState {
   x: number;
@@ -68,13 +77,20 @@ interface SnapGuide {
   label: string;
 }
 
+interface SnapSettings {
+  grid: boolean;
+  objects: boolean;
+  orthogonal: boolean;
+}
+
 interface CeilingSketcherProps {
   value: CeilingSketch;
   onChange: (nextSketch: CeilingSketch, metrics: CeilingSketchMetrics) => void;
 }
 
 const GRID_STEP_MM = 50;
-const SNAP_DISTANCE_MM = 140;
+const OBJECT_SNAP_DISTANCE_MM = 70;
+const ORTHO_SNAP_DISTANCE_MM = 55;
 
 function lineLengthMm(start: CeilingSketchPointRef, end: CeilingSketchPointRef) {
   return Math.round(Math.hypot(end.xMm - start.xMm, end.yMm - start.yMm));
@@ -124,6 +140,35 @@ function selectedPointOf(sketch: CeilingSketch, selectedObjectId: string): Ceili
   return null;
 }
 
+function selectedFixtureOf(sketch: CeilingSketch, selectedObjectId: string) {
+  return sketch.fixtures.find((item) => item.id === selectedObjectId) || null;
+}
+
+function selectedObstacleOf(sketch: CeilingSketch, selectedObjectId: string) {
+  return sketch.obstacles.find((item) => item.id === selectedObjectId) || null;
+}
+
+function selectedLinearFeatureOf(sketch: CeilingSketch, selectedObjectId: string) {
+  return sketch.linearFeatures.find((item) => item.id === selectedObjectId) || null;
+}
+
+function selectedLevelOf(sketch: CeilingSketch, selectedObjectId: string) {
+  return sketch.levels.find((item) => item.id === selectedObjectId) || null;
+}
+
+function selectedSeamOf(sketch: CeilingSketch, selectedObjectId: string) {
+  return sketch.fabric.seams.find((item) => item.id === selectedObjectId) || null;
+}
+
+function offsetFromBounds(point: CeilingSketchPointRef, bounds: ReturnType<typeof sketchBounds>) {
+  return {
+    left: Math.round(point.xMm - bounds.minX),
+    right: Math.round(bounds.maxX - point.xMm),
+    top: Math.round(point.yMm - bounds.minY),
+    bottom: Math.round(bounds.maxY - point.yMm),
+  };
+}
+
 function collectSnapPoints(sketch: CeilingSketch, target: DragTarget): Array<CeilingSketchPointRef & { label: string }> {
   const points: Array<CeilingSketchPointRef & { label: string }> = [];
 
@@ -152,33 +197,57 @@ function collectSnapPoints(sketch: CeilingSketch, target: DragTarget): Array<Cei
     }
   });
 
+  sketch.levels.forEach((level, levelIndex) => {
+    level.points.forEach((levelPoint, pointIndex) => {
+      if (target.kind === 'level' && level.id === target.id && levelPoint.id === target.pointId) return;
+      points.push({ ...levelPoint, label: `${level.name || `уровень ${levelIndex + 2}`} т.${pointIndex + 1}` });
+    });
+  });
+
+  sketch.fabric.seams.forEach((seam, index) => {
+    if (!(target.kind === 'seam' && seam.id === target.id && target.endpoint === 'start')) {
+      points.push({ ...seam.start, label: `шов ${index + 1}` });
+    }
+
+    if (!(target.kind === 'seam' && seam.id === target.id && target.endpoint === 'end')) {
+      points.push({ ...seam.end, label: `шов ${index + 1}` });
+    }
+  });
+
   return points;
 }
 
 function snapPoint(
   sketch: CeilingSketch,
   rawPoint: CeilingSketchPointRef,
-  target: DragTarget
+  target: DragTarget,
+  settings: SnapSettings
 ): { point: CeilingSketchPointRef; guides: SnapGuide[] } {
-  const snapped = {
-    xMm: roundToStep(rawPoint.xMm, GRID_STEP_MM),
-    yMm: roundToStep(rawPoint.yMm, GRID_STEP_MM),
-  };
+  const snapped = settings.grid
+    ? {
+      xMm: roundToStep(rawPoint.xMm, GRID_STEP_MM),
+      yMm: roundToStep(rawPoint.yMm, GRID_STEP_MM),
+    }
+    : { ...rawPoint };
   const guides: SnapGuide[] = [];
 
-  collectSnapPoints(sketch, target).forEach((point) => {
-    if (Math.abs(point.xMm - snapped.xMm) <= SNAP_DISTANCE_MM) {
-      snapped.xMm = point.xMm;
-      guides.push({ axis: 'x', value: point.xMm, label: `X: ${point.label}` });
-    }
+  const snapPoints = collectSnapPoints(sketch, target);
 
-    if (Math.abs(point.yMm - snapped.yMm) <= SNAP_DISTANCE_MM) {
-      snapped.yMm = point.yMm;
-      guides.push({ axis: 'y', value: point.yMm, label: `Y: ${point.label}` });
-    }
-  });
+  if (settings.objects) {
+    snapPoints.forEach((point) => {
+      if (Math.abs(point.xMm - snapped.xMm) <= OBJECT_SNAP_DISTANCE_MM) {
+        snapped.xMm = point.xMm;
+        guides.push({ axis: 'x', value: point.xMm, label: `X: ${point.label}` });
+      }
 
-  if (target.kind === 'corner') {
+      if (Math.abs(point.yMm - snapped.yMm) <= OBJECT_SNAP_DISTANCE_MM) {
+        snapped.yMm = point.yMm;
+        guides.push({ axis: 'y', value: point.yMm, label: `Y: ${point.label}` });
+      }
+    });
+  }
+
+  if (settings.orthogonal && target.kind === 'corner') {
     const currentIndex = sketch.points.findIndex((point) => point.id === target.id);
 
     if (currentIndex !== -1) {
@@ -188,12 +257,12 @@ function snapPoint(
       [previous, next].forEach((point, index) => {
         const label = index === 0 ? 'соседний угол' : 'следующий угол';
 
-        if (Math.abs(point.xMm - snapped.xMm) <= SNAP_DISTANCE_MM * 1.25) {
+        if (Math.abs(point.xMm - snapped.xMm) <= ORTHO_SNAP_DISTANCE_MM) {
           snapped.xMm = point.xMm;
           guides.push({ axis: 'x', value: point.xMm, label: `вертикаль: ${label}` });
         }
 
-        if (Math.abs(point.yMm - snapped.yMm) <= SNAP_DISTANCE_MM * 1.25) {
+        if (Math.abs(point.yMm - snapped.yMm) <= ORTHO_SNAP_DISTANCE_MM) {
           snapped.yMm = point.yMm;
           guides.push({ axis: 'y', value: point.yMm, label: `горизонталь: ${label}` });
         }
@@ -212,7 +281,13 @@ export default function CeilingSketcher({ value, onChange }: CeilingSketcherProp
   const [dragTarget, setDragTarget] = useState<DragTarget | null>(null);
   const [selectedObjectId, setSelectedObjectId] = useState('');
   const [frozenViewBox, setFrozenViewBox] = useState<ViewBoxState | null>(null);
+  const [lockedViewBox, setLockedViewBox] = useState<ViewBoxState | null>(null);
   const [snapGuides, setSnapGuides] = useState<SnapGuide[]>([]);
+  const [snapSettings, setSnapSettings] = useState<SnapSettings>({
+    grid: true,
+    objects: false,
+    orthogonal: false,
+  });
 
   const bounds = useMemo(() => sketchBounds(value), [value]);
   const metrics = useMemo(() => calculateCeilingSketchMetrics(value), [value]);
@@ -224,10 +299,40 @@ export default function CeilingSketcher({ value, onChange }: CeilingSketcherProp
     width: bounds.width + padding * 2,
     height: bounds.height + padding * 2,
   }), [bounds, padding]);
-  const activeViewBox = frozenViewBox || liveViewBox;
+  const activeViewBox = frozenViewBox || lockedViewBox || liveViewBox;
   const selectedPoint = selectedPointOf(value, selectedObjectId);
+  const selectedFixture = selectedFixtureOf(value, selectedObjectId);
+  const selectedObstacle = selectedObstacleOf(value, selectedObjectId);
+  const selectedLinearFeature = selectedLinearFeatureOf(value, selectedObjectId);
+  const selectedLevel = selectedLevelOf(value, selectedObjectId);
+  const selectedSeam = selectedSeamOf(value, selectedObjectId);
+  const selectedAnchorPoint = selectedFixture?.point || selectedObstacle?.point || selectedPoint;
+  const selectedOffsets = selectedAnchorPoint ? offsetFromBounds(selectedAnchorPoint, bounds) : null;
 
-  function emit(nextSketch: CeilingSketch) {
+  useEffect(() => {
+    if (!dragTarget) return undefined;
+
+    const previousOverflow = document.body.style.overflow;
+    const previousTouchAction = document.body.style.touchAction;
+    const previousOverscroll = document.documentElement.style.overscrollBehavior;
+
+    document.body.style.overflow = 'hidden';
+    document.body.style.touchAction = 'none';
+    document.documentElement.style.overscrollBehavior = 'none';
+
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      document.body.style.touchAction = previousTouchAction;
+      document.documentElement.style.overscrollBehavior = previousOverscroll;
+    };
+  }, [dragTarget]);
+
+  function emit(nextSketch: CeilingSketch, options?: { fitView?: boolean }) {
+    if (options?.fitView) {
+      setLockedViewBox(null);
+      setFrozenViewBox(null);
+    }
+
     onChange(nextSketch, calculateCeilingSketchMetrics(nextSketch));
   }
 
@@ -261,6 +366,14 @@ export default function CeilingSketcher({ value, onChange }: CeilingSketcherProp
     if (target.kind === 'linear') {
       emit(updateLinearFeaturePoint(value, target.id, target.endpoint, point));
     }
+
+    if (target.kind === 'level') {
+      emit(updateCeilingLevelPoint(value, target.id, target.pointId, point));
+    }
+
+    if (target.kind === 'seam') {
+      emit(updateFabricSeamPoint(value, target.id, target.endpoint, point));
+    }
   }
 
   function handlePointerMove(event: PointerEvent<SVGSVGElement>) {
@@ -268,7 +381,7 @@ export default function CeilingSketcher({ value, onChange }: CeilingSketcherProp
 
     event.preventDefault();
     const rawPoint = pointerToSketchPoint(event);
-    const snapped = snapPoint(value, rawPoint, dragTarget);
+    const snapped = snapPoint(value, rawPoint, dragTarget, snapSettings);
     setSnapGuides(snapped.guides);
     updatePointLikeObject(dragTarget, snapped.point);
   }
@@ -282,6 +395,7 @@ export default function CeilingSketcher({ value, onChange }: CeilingSketcherProp
   function startDrag(event: PointerEvent<SVGElement>, target: DragTarget) {
     event.preventDefault();
     event.stopPropagation();
+    setLockedViewBox(activeViewBox);
     setFrozenViewBox(activeViewBox);
     setDragTarget(target);
     setSelectedObjectId(target.id);
@@ -290,7 +404,7 @@ export default function CeilingSketcher({ value, onChange }: CeilingSketcherProp
   }
 
   function removeSelected() {
-    if (!selectedObjectId) return;
+    if (!selectedObjectId || selectedObjectId === 'base') return;
 
     const isCorner = value.points.some((point) => point.id === selectedObjectId);
     const nextSketch = isCorner
@@ -317,6 +431,58 @@ export default function CeilingSketcher({ value, onChange }: CeilingSketcherProp
     if (obstacle) emit(updateObstacle(value, selectedObjectId, nextPoint));
   }
 
+  function updateSelectedOffset(side: 'left' | 'right' | 'top' | 'bottom', nextValue: number) {
+    const targetPoint = selectedFixture?.point || selectedObstacle?.point;
+    if (!targetPoint) return;
+
+    const nextPoint = {
+      ...targetPoint,
+      xMm: side === 'left'
+        ? bounds.minX + Number(nextValue || 0)
+        : side === 'right'
+          ? bounds.maxX - Number(nextValue || 0)
+          : targetPoint.xMm,
+      yMm: side === 'top'
+        ? bounds.minY + Number(nextValue || 0)
+        : side === 'bottom'
+          ? bounds.maxY - Number(nextValue || 0)
+          : targetPoint.yMm,
+    };
+
+    if (selectedFixture) emit(updateFixture(value, selectedFixture.id, nextPoint));
+    if (selectedObstacle) emit(updateObstacle(value, selectedObstacle.id, nextPoint));
+  }
+
+  function updateLinearEndpoint(endpoint: 'start' | 'end', axis: 'xMm' | 'yMm', nextValue: number) {
+    if (!selectedLinearFeature) return;
+    emit(updateLinearFeaturePoint(value, selectedLinearFeature.id, endpoint, {
+      ...selectedLinearFeature[endpoint],
+      [axis]: roundToStep(Number(nextValue || 0), 10),
+    }));
+  }
+
+  function updateSeamEndpoint(endpoint: 'start' | 'end', axis: 'xMm' | 'yMm', nextValue: number) {
+    if (!selectedSeam) return;
+    emit(updateFabricSeamPoint(value, selectedSeam.id, endpoint, {
+      ...selectedSeam[endpoint],
+      [axis]: roundToStep(Number(nextValue || 0), 10),
+    }));
+  }
+
+  function updateLevelPoint(level: CeilingSketchLevel, pointId: string, axis: 'xMm' | 'yMm', nextValue: number) {
+    const levelPoint = level.points.find((point) => point.id === pointId);
+    if (!levelPoint) return;
+
+    emit(updateCeilingLevelPoint(value, level.id, pointId, {
+      ...levelPoint,
+      [axis]: roundToStep(Number(nextValue || 0), 10),
+    }));
+  }
+
+  function toggleSnap(setting: keyof SnapSettings) {
+    setSnapSettings((prev) => ({ ...prev, [setting]: !prev[setting] }));
+  }
+
   function renderToolButtons() {
     return (
       <Stack
@@ -336,6 +502,18 @@ export default function CeilingSketcher({ value, onChange }: CeilingSketcherProp
           },
         }}
       >
+        <Button size="large" variant={snapSettings.grid ? 'contained' : 'outlined'} onClick={() => toggleSnap('grid')}>
+          Сетка
+        </Button>
+        <Button size="large" variant={snapSettings.objects ? 'contained' : 'outlined'} onClick={() => toggleSnap('objects')}>
+          Объекты
+        </Button>
+        <Button size="large" variant={snapSettings.orthogonal ? 'contained' : 'outlined'} onClick={() => toggleSnap('orthogonal')}>
+          90°
+        </Button>
+        <Button size="large" variant="outlined" onClick={() => setLockedViewBox(null)}>
+          Вписать
+        </Button>
         <Button size="large" variant="outlined" startIcon={<AddIcon />} onClick={() => emit(addCeilingCorner(value))}>
           Угол
         </Button>
@@ -363,9 +541,10 @@ export default function CeilingSketcher({ value, onChange }: CeilingSketcherProp
 
   function renderHandle(target: DragTarget, point: CeilingSketchPointRef, color: string, label?: string) {
     const selected = selectedObjectId === target.id;
+    const keySuffix = 'endpoint' in target ? target.endpoint : 'pointId' in target ? target.pointId : 'point';
 
     return (
-      <g key={`${target.kind}-${target.id}-${'endpoint' in target ? target.endpoint : 'point'}`}>
+      <g key={`${target.kind}-${target.id}-${keySuffix}`}>
         <circle
           cx={point.xMm}
           cy={point.yMm}
@@ -428,8 +607,8 @@ export default function CeilingSketcher({ value, onChange }: CeilingSketcherProp
                 <Chip color="primary" label={`${metrics.areaM2} м²`} />
                 <Chip label={`${metrics.perimeterM} м`} />
                 <Chip label={`${metrics.corners} угл.`} />
-                <Chip label="Сетка 50 мм" />
-                <Chip label="X/Y привязки" />
+                <Chip label={snapSettings.grid ? 'Сетка 50 мм' : 'Сетка выкл.'} />
+                <Chip label={snapSettings.orthogonal ? '90° вкл.' : '90° выкл.'} />
               </Stack>
 
               <Stack direction="row" spacing={1} sx={{ flexWrap: 'wrap', gap: 1 }}>
@@ -451,11 +630,14 @@ export default function CeilingSketcher({ value, onChange }: CeilingSketcherProp
               onPointerMove={handlePointerMove}
               onPointerUp={finishDrag}
               onPointerCancel={finishDrag}
+              onPointerLeave={finishDrag}
               style={{
                 width: '100%',
                 height: '100%',
                 display: 'block',
                 touchAction: 'none',
+                userSelect: 'none',
+                WebkitUserSelect: 'none',
                 background: '#F8FAFC',
               }}
             >
@@ -504,41 +686,60 @@ export default function CeilingSketcher({ value, onChange }: CeilingSketcherProp
                   )
               ))}
 
-              <polygon points={polygonPoints} fill="#DBEAFE" stroke="#0F172A" strokeWidth="5" vectorEffect="non-scaling-stroke" />
-              <polygon points={polygonPoints} fill="url(#fabric-lines)" opacity="0.45" />
+              <polygon
+                points={polygonPoints}
+                fill={selectedObjectId === 'base' ? '#BFDBFE' : '#DBEAFE'}
+                stroke="#0F172A"
+                strokeWidth="5"
+                vectorEffect="non-scaling-stroke"
+                onPointerDown={() => setSelectedObjectId('base')}
+              />
+              <polygon
+                points={polygonPoints}
+                fill="url(#fabric-lines)"
+                opacity="0.45"
+                pointerEvents="none"
+              />
 
               {value.levels.map((level) => (
-                <polygon
-                  key={level.id}
-                  points={sketchPointList(level.points)}
-                  fill="rgba(245, 158, 11, 0.12)"
-                  stroke="#B45309"
-                  strokeWidth="5"
-                  strokeDasharray="20 12"
-                  vectorEffect="non-scaling-stroke"
-                  onPointerDown={(event) => {
-                    event.stopPropagation();
-                    setSelectedObjectId(level.id);
-                  }}
-                />
+                <g key={level.id}>
+                  <polygon
+                    points={sketchPointList(level.points)}
+                    fill={selectedObjectId === level.id ? 'rgba(245, 158, 11, 0.22)' : 'rgba(245, 158, 11, 0.12)'}
+                    stroke="#B45309"
+                    strokeWidth="5"
+                    strokeDasharray="20 12"
+                    vectorEffect="non-scaling-stroke"
+                    onPointerDown={(event) => {
+                      event.stopPropagation();
+                      setSelectedObjectId(level.id);
+                    }}
+                  />
+                  {level.points.map((levelPoint, index) => (
+                    renderHandle({ kind: 'level', id: level.id, pointId: levelPoint.id }, levelPoint, '#B45309', String(index + 1))
+                  ))}
+                </g>
               ))}
 
               {value.fabric.seams.map((seam) => (
-                <line
-                  key={seam.id}
-                  x1={seam.start.xMm}
-                  y1={seam.start.yMm}
-                  x2={seam.end.xMm}
-                  y2={seam.end.yMm}
-                  stroke="#7C3AED"
-                  strokeWidth="5"
-                  strokeDasharray="18 14"
-                  vectorEffect="non-scaling-stroke"
-                  onPointerDown={(event) => {
-                    event.stopPropagation();
-                    setSelectedObjectId(seam.id);
-                  }}
-                />
+                <g key={seam.id}>
+                  <line
+                    x1={seam.start.xMm}
+                    y1={seam.start.yMm}
+                    x2={seam.end.xMm}
+                    y2={seam.end.yMm}
+                    stroke="#7C3AED"
+                    strokeWidth={selectedObjectId === seam.id ? '8' : '5'}
+                    strokeDasharray="18 14"
+                    vectorEffect="non-scaling-stroke"
+                    onPointerDown={(event) => {
+                      event.stopPropagation();
+                      setSelectedObjectId(seam.id);
+                    }}
+                  />
+                  {renderHandle({ kind: 'seam', id: seam.id, endpoint: 'start' }, seam.start, '#7C3AED')}
+                  {renderHandle({ kind: 'seam', id: seam.id, endpoint: 'end' }, seam.end, '#7C3AED')}
+                </g>
               ))}
 
               {value.linearFeatures.map((feature: CeilingSketchLinearFeature) => {
@@ -610,6 +811,50 @@ export default function CeilingSketcher({ value, onChange }: CeilingSketcherProp
                 </g>
               ))}
 
+              {selectedAnchorPoint && selectedOffsets && (
+                <g pointerEvents="none">
+                  <line
+                    x1={bounds.minX}
+                    y1={selectedAnchorPoint.yMm}
+                    x2={selectedAnchorPoint.xMm}
+                    y2={selectedAnchorPoint.yMm}
+                    stroke="#475569"
+                    strokeWidth="4"
+                    strokeDasharray="16 12"
+                    vectorEffect="non-scaling-stroke"
+                  />
+                  <line
+                    x1={selectedAnchorPoint.xMm}
+                    y1={bounds.minY}
+                    x2={selectedAnchorPoint.xMm}
+                    y2={selectedAnchorPoint.yMm}
+                    stroke="#475569"
+                    strokeWidth="4"
+                    strokeDasharray="16 12"
+                    vectorEffect="non-scaling-stroke"
+                  />
+                  <text
+                    x={(bounds.minX + selectedAnchorPoint.xMm) / 2}
+                    y={selectedAnchorPoint.yMm - 120}
+                    textAnchor="middle"
+                    fontSize="150"
+                    fontWeight="800"
+                    fill="#334155"
+                  >
+                    {selectedOffsets.left} мм
+                  </text>
+                  <text
+                    x={selectedAnchorPoint.xMm + 120}
+                    y={(bounds.minY + selectedAnchorPoint.yMm) / 2}
+                    fontSize="150"
+                    fontWeight="800"
+                    fill="#334155"
+                  >
+                    {selectedOffsets.top} мм
+                  </text>
+                </g>
+              )}
+
               {value.points.map((sketchPoint, index) => (
                 renderHandle({ kind: 'corner', id: sketchPoint.id }, sketchPoint, '#1D4ED8', String(index + 1))
               ))}
@@ -634,7 +879,7 @@ export default function CeilingSketcher({ value, onChange }: CeilingSketcherProp
                 label="Ширина, мм"
                 type="number"
                 value={Math.round(bounds.width)}
-                onChange={(event) => emit(resizeCeilingSketch(value, Number(event.target.value), bounds.height))}
+                onChange={(event) => emit(resizeCeilingSketch(value, Number(event.target.value), bounds.height), { fitView: true })}
                 fullWidth
               />
               <TextField
@@ -642,7 +887,7 @@ export default function CeilingSketcher({ value, onChange }: CeilingSketcherProp
                 label="Глубина, мм"
                 type="number"
                 value={Math.round(bounds.height)}
-                onChange={(event) => emit(resizeCeilingSketch(value, bounds.width, Number(event.target.value)))}
+                onChange={(event) => emit(resizeCeilingSketch(value, bounds.width, Number(event.target.value)), { fitView: true })}
                 fullWidth
               />
             </Stack>
@@ -668,11 +913,173 @@ export default function CeilingSketcher({ value, onChange }: CeilingSketcherProp
               </Stack>
             )}
 
+            {selectedObjectId === 'base' && (
+              <Box sx={{ p: 1.25, borderRadius: 2, bgcolor: 'primary.50', border: '1px solid', borderColor: 'primary.100' }}>
+                <Typography variant="subtitle2">Основное полотно</Typography>
+                <Stack direction="row" spacing={1} sx={{ flexWrap: 'wrap', gap: 1, mt: 1 }}>
+                  <Chip size="small" label={`${metrics.areaM2} м²`} />
+                  <Chip size="small" label={`${metrics.perimeterM} м периметр`} />
+                  <Chip size="small" label={`${metrics.seamsM} м швов`} />
+                </Stack>
+              </Box>
+            )}
+
+            {(selectedFixture || selectedObstacle) && selectedOffsets && (
+              <Box sx={{ p: 1.25, borderRadius: 2, bgcolor: 'grey.50' }}>
+                <Typography variant="subtitle2" sx={{ mb: 1 }}>
+                  Привязки от стен
+                </Typography>
+                <Stack direction="row" spacing={1} sx={{ mb: 1 }}>
+                  <TextField
+                    size="small"
+                    label="Слева, мм"
+                    type="number"
+                    value={selectedOffsets.left}
+                    onChange={(event) => updateSelectedOffset('left', Number(event.target.value))}
+                    fullWidth
+                  />
+                  <TextField
+                    size="small"
+                    label="Сверху, мм"
+                    type="number"
+                    value={selectedOffsets.top}
+                    onChange={(event) => updateSelectedOffset('top', Number(event.target.value))}
+                    fullWidth
+                  />
+                </Stack>
+                <Stack direction="row" spacing={1}>
+                  <TextField
+                    size="small"
+                    label="Справа, мм"
+                    type="number"
+                    value={selectedOffsets.right}
+                    onChange={(event) => updateSelectedOffset('right', Number(event.target.value))}
+                    fullWidth
+                  />
+                  <TextField
+                    size="small"
+                    label="Снизу, мм"
+                    type="number"
+                    value={selectedOffsets.bottom}
+                    onChange={(event) => updateSelectedOffset('bottom', Number(event.target.value))}
+                    fullWidth
+                  />
+                </Stack>
+              </Box>
+            )}
+
+            {selectedFixture && (
+              <TextField
+                size="small"
+                label="Диаметр светильника, мм"
+                type="number"
+                value={selectedFixture.diameterMm}
+                onChange={(event) => emit(updateFixtureDetails(value, selectedFixture.id, { diameterMm: Number(event.target.value) }))}
+              />
+            )}
+
+            {selectedObstacle && (
+              <Stack direction="row" spacing={1}>
+                <TextField
+                  size="small"
+                  label="Диаметр, мм"
+                  type="number"
+                  value={selectedObstacle.diameterMm}
+                  onChange={(event) => emit(updateObstacleDetails(value, selectedObstacle.id, { diameterMm: Number(event.target.value) }))}
+                  fullWidth
+                />
+                <TextField
+                  size="small"
+                  label="Зазор, мм"
+                  type="number"
+                  value={selectedObstacle.clearanceMm}
+                  onChange={(event) => emit(updateObstacleDetails(value, selectedObstacle.id, { clearanceMm: Number(event.target.value) }))}
+                  fullWidth
+                />
+              </Stack>
+            )}
+
+            {selectedLinearFeature && (
+              <Box sx={{ p: 1.25, borderRadius: 2, bgcolor: 'grey.50' }}>
+                <Typography variant="subtitle2" sx={{ mb: 1 }}>{featureLabel(selectedLinearFeature.kind)}</Typography>
+                <Stack direction="row" spacing={1} sx={{ mb: 1 }}>
+                  <TextField
+                    size="small"
+                    label="Ширина, мм"
+                    type="number"
+                    value={selectedLinearFeature.widthMm}
+                    onChange={(event) => emit(updateLinearFeatureDetails(value, selectedLinearFeature.id, { widthMm: Number(event.target.value) }))}
+                    fullWidth
+                  />
+                  <TextField
+                    size="small"
+                    label="Длина, м"
+                    value={formatSketchNumber(lineLengthMm(selectedLinearFeature.start, selectedLinearFeature.end) / 1000)}
+                    slotProps={{ input: { readOnly: true } }}
+                    fullWidth
+                  />
+                </Stack>
+                <Stack direction="row" spacing={1} sx={{ mb: 1 }}>
+                  <TextField size="small" label="Старт X" type="number" value={Math.round(selectedLinearFeature.start.xMm)} onChange={(event) => updateLinearEndpoint('start', 'xMm', Number(event.target.value))} fullWidth />
+                  <TextField size="small" label="Старт Y" type="number" value={Math.round(selectedLinearFeature.start.yMm)} onChange={(event) => updateLinearEndpoint('start', 'yMm', Number(event.target.value))} fullWidth />
+                </Stack>
+                <Stack direction="row" spacing={1}>
+                  <TextField size="small" label="Финиш X" type="number" value={Math.round(selectedLinearFeature.end.xMm)} onChange={(event) => updateLinearEndpoint('end', 'xMm', Number(event.target.value))} fullWidth />
+                  <TextField size="small" label="Финиш Y" type="number" value={Math.round(selectedLinearFeature.end.yMm)} onChange={(event) => updateLinearEndpoint('end', 'yMm', Number(event.target.value))} fullWidth />
+                </Stack>
+              </Box>
+            )}
+
+            {selectedSeam && (
+              <Box sx={{ p: 1.25, borderRadius: 2, bgcolor: 'grey.50' }}>
+                <Typography variant="subtitle2" sx={{ mb: 1 }}>Шов / разделитель полотна</Typography>
+                <Stack direction="row" spacing={1} sx={{ mb: 1 }}>
+                  <TextField size="small" label="Старт X" type="number" value={Math.round(selectedSeam.start.xMm)} onChange={(event) => updateSeamEndpoint('start', 'xMm', Number(event.target.value))} fullWidth />
+                  <TextField size="small" label="Старт Y" type="number" value={Math.round(selectedSeam.start.yMm)} onChange={(event) => updateSeamEndpoint('start', 'yMm', Number(event.target.value))} fullWidth />
+                </Stack>
+                <Stack direction="row" spacing={1}>
+                  <TextField size="small" label="Финиш X" type="number" value={Math.round(selectedSeam.end.xMm)} onChange={(event) => updateSeamEndpoint('end', 'xMm', Number(event.target.value))} fullWidth />
+                  <TextField size="small" label="Финиш Y" type="number" value={Math.round(selectedSeam.end.yMm)} onChange={(event) => updateSeamEndpoint('end', 'yMm', Number(event.target.value))} fullWidth />
+                </Stack>
+              </Box>
+            )}
+
+            {selectedLevel && (
+              <Box sx={{ p: 1.25, borderRadius: 2, bgcolor: 'grey.50' }}>
+                <Typography variant="subtitle2" sx={{ mb: 1 }}>Многоуровневый участок</Typography>
+                <Stack direction="row" spacing={1} sx={{ mb: 1 }}>
+                  <TextField
+                    size="small"
+                    label="Название"
+                    value={selectedLevel.name}
+                    onChange={(event) => emit(updateCeilingLevelDetails(value, selectedLevel.id, { name: event.target.value }))}
+                    fullWidth
+                  />
+                  <TextField
+                    size="small"
+                    label="Перепад, мм"
+                    type="number"
+                    value={selectedLevel.elevationMm}
+                    onChange={(event) => emit(updateCeilingLevelDetails(value, selectedLevel.id, { elevationMm: Number(event.target.value) }))}
+                    fullWidth
+                  />
+                </Stack>
+                <Stack spacing={1}>
+                  {selectedLevel.points.map((levelPoint, index) => (
+                    <Stack key={levelPoint.id} direction="row" spacing={1}>
+                      <TextField size="small" label={`Т${index + 1} X`} type="number" value={Math.round(levelPoint.xMm)} onChange={(event) => updateLevelPoint(selectedLevel, levelPoint.id, 'xMm', Number(event.target.value))} fullWidth />
+                      <TextField size="small" label={`Т${index + 1} Y`} type="number" value={Math.round(levelPoint.yMm)} onChange={(event) => updateLevelPoint(selectedLevel, levelPoint.id, 'yMm', Number(event.target.value))} fullWidth />
+                    </Stack>
+                  ))}
+                </Stack>
+              </Box>
+            )}
+
             <Button
               color="error"
               variant="outlined"
               startIcon={<DeleteIcon />}
-              disabled={!selectedObjectId}
+              disabled={!selectedObjectId || selectedObjectId === 'base'}
               onClick={removeSelected}
               sx={{ minHeight: 48 }}
             >
@@ -733,6 +1140,12 @@ export default function CeilingSketcher({ value, onChange }: CeilingSketcherProp
 
             <Typography variant="subtitle2">Объекты</Typography>
             <Stack spacing={0.75} sx={{ maxHeight: 190, overflow: 'auto' }}>
+              <Chip
+                variant={selectedObjectId === 'base' ? 'filled' : 'outlined'}
+                color={selectedObjectId === 'base' ? 'primary' : 'default'}
+                label={`Основное полотно · ${metrics.areaM2} м²`}
+                onClick={() => setSelectedObjectId('base')}
+              />
               {value.linearFeatures.map((feature) => (
                 <Chip
                   key={feature.id}
