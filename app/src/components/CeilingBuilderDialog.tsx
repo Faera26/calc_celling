@@ -90,6 +90,22 @@ interface DragTarget {
   id: string;
 }
 
+interface SinglePanGesture {
+  pointerId: number;
+  startClientX: number;
+  startClientY: number;
+  panX: number;
+  panY: number;
+  viewBox: ViewBoxState;
+}
+
+interface OrthoDragState {
+  pointId: string;
+  originX: number;
+  originY: number;
+  axis: 'x' | 'y' | null;
+}
+
 interface CeilingBuilderDialogProps {
   open: boolean;
   roomName: string;
@@ -123,6 +139,8 @@ const OBJECT_OPTIONS: Array<{ id: CeilingBuilderObjectType; label: string }> = [
   { id: 'sensor', label: 'Датчик' },
   { id: 'custom', label: 'Другое' },
 ];
+
+const ORTHO_LOCK_THRESHOLD_MM = 40;
 
 function cloneState(state: CeilingShapeBuilderState) {
   return JSON.parse(JSON.stringify(state)) as CeilingShapeBuilderState;
@@ -241,6 +259,8 @@ export default function CeilingBuilderDialog({
   const dragStartStateRef = useRef<CeilingShapeBuilderState | null>(null);
   const pendingDragPointRef = useRef<{ x: number; y: number } | null>(null);
   const dragRafRef = useRef<number | null>(null);
+  const singlePanRef = useRef<SinglePanGesture | null>(null);
+  const orthoDragRef = useRef<OrthoDragState | null>(null);
   const pointersRef = useRef(new Map<number, { x: number; y: number }>());
   const gestureRef = useRef<{
     distance: number;
@@ -398,6 +418,38 @@ export default function CeilingBuilderDialog({
     return { x: Math.round(x), y: Math.round(y) };
   }
 
+  function constrainPointDrag(rawPoint: { x: number; y: number }, target: DragTarget) {
+    if (target.kind !== 'point' || !builder.viewState.orthoEnabled) return rawPoint;
+
+    const orthoDrag = orthoDragRef.current;
+    if (!orthoDrag || orthoDrag.pointId !== target.id) return rawPoint;
+
+    const dx = rawPoint.x - orthoDrag.originX;
+    const dy = rawPoint.y - orthoDrag.originY;
+    if (!orthoDrag.axis && Math.max(Math.abs(dx), Math.abs(dy)) >= ORTHO_LOCK_THRESHOLD_MM) {
+      orthoDrag.axis = Math.abs(dx) >= Math.abs(dy) ? 'x' : 'y';
+    }
+
+    if (!orthoDrag.axis) {
+      return { x: orthoDrag.originX, y: orthoDrag.originY };
+    }
+
+    return orthoDrag.axis === 'x'
+      ? { x: rawPoint.x, y: orthoDrag.originY }
+      : { x: orthoDrag.originX, y: rawPoint.y };
+  }
+
+  function constrainNewPoint(state: CeilingShapeBuilderState, rawPoint: { x: number; y: number }) {
+    if (!state.viewState.orthoEnabled || state.points.length === 0) return rawPoint;
+
+    const previous = state.points[state.points.length - 1];
+    const dx = rawPoint.x - previous.x;
+    const dy = rawPoint.y - previous.y;
+    return Math.abs(dx) >= Math.abs(dy)
+      ? { x: rawPoint.x, y: previous.y }
+      : { x: previous.x, y: rawPoint.y };
+  }
+
   function scheduleDragUpdate() {
     if (dragRafRef.current !== null) return;
 
@@ -406,11 +458,12 @@ export default function CeilingBuilderDialog({
       const point = pendingDragPointRef.current;
       dragRafRef.current = null;
       if (!target || !point) return;
+      const constrainedPoint = constrainPointDrag(point, target);
 
       setBuilder((prev) => (
         target.kind === 'point'
-          ? moveBuilderPoint(prev, target.id, point.x, point.y)
-          : updateBuilderObject(prev, target.id, { x: point.x, y: point.y })
+          ? moveBuilderPoint(prev, target.id, constrainedPoint.x, constrainedPoint.y)
+          : updateBuilderObject(prev, target.id, { x: constrainedPoint.x, y: constrainedPoint.y })
       ));
     });
   }
@@ -422,6 +475,17 @@ export default function CeilingBuilderDialog({
     dragStartStateRef.current = cloneState(builder);
     setFrozenViewBox(buildViewBox(builder));
     pendingDragPointRef.current = worldPointFromClient(event.clientX, event.clientY);
+    if (target.kind === 'point') {
+      const currentPoint = builder.points.find((point) => point.id === target.id);
+      orthoDragRef.current = currentPoint
+        ? {
+          pointId: target.id,
+          originX: currentPoint.x,
+          originY: currentPoint.y,
+          axis: null,
+        }
+        : null;
+    }
     selectElement(target.kind, target.id);
     if (target.kind === 'point' && builder.viewState.activeMode !== 'shape') {
       setMode('shape');
@@ -442,6 +506,7 @@ export default function CeilingBuilderDialog({
     dragStartStateRef.current = null;
     setFrozenViewBox(null);
     pendingDragPointRef.current = null;
+    orthoDragRef.current = null;
   }
 
   function beginGestureIfNeeded() {
@@ -467,6 +532,16 @@ export default function CeilingBuilderDialog({
     pointersRef.current.set(event.pointerId, { x: event.clientX, y: event.clientY });
     event.currentTarget.setPointerCapture(event.pointerId);
     tapStartRef.current = { x: event.clientX, y: event.clientY, moved: false };
+    if (pointersRef.current.size === 1) {
+      singlePanRef.current = {
+        pointerId: event.pointerId,
+        startClientX: event.clientX,
+        startClientY: event.clientY,
+        panX: builder.viewState.panX,
+        panY: builder.viewState.panY,
+        viewBox: buildViewBox(builder),
+      };
+    }
     if (pointersRef.current.size === 2) beginGestureIfNeeded();
   }
 
@@ -508,6 +583,29 @@ export default function CeilingBuilderDialog({
           panY: gestureRef.current!.panY - (centerY - gestureRef.current!.centerY) * worldPerPixelY,
         },
       }));
+      return;
+    }
+
+    const singlePan = singlePanRef.current;
+    if (
+      pointersRef.current.size === 1
+      && singlePan
+      && singlePan.pointerId === event.pointerId
+      && tapStartRef.current?.moved
+    ) {
+      const svg = svgRef.current;
+      const rect = svg?.getBoundingClientRect();
+      const worldPerPixelX = singlePan.viewBox.width / Math.max(rect?.width || 1, 1);
+      const worldPerPixelY = singlePan.viewBox.height / Math.max(rect?.height || 1, 1);
+
+      setBuilder((prev) => ({
+        ...prev,
+        viewState: {
+          ...prev.viewState,
+          panX: singlePan.panX - (event.clientX - singlePan.startClientX) * worldPerPixelX,
+          panY: singlePan.panY - (event.clientY - singlePan.startClientY) * worldPerPixelY,
+        },
+      }));
     }
   }
 
@@ -523,6 +621,9 @@ export default function CeilingBuilderDialog({
     if (pointersRef.current.size < 2) {
       gestureRef.current = null;
     }
+    if (singlePanRef.current?.pointerId === event.pointerId) {
+      singlePanRef.current = null;
+    }
 
     const wasTap = tapStartRef.current && !tapStartRef.current.moved;
     tapStartRef.current = null;
@@ -530,7 +631,10 @@ export default function CeilingBuilderDialog({
 
     if (builder.viewState.activeMode === 'shape' && builder.template === 'free' && !builder.isClosed) {
       const point = worldPointFromClient(event.clientX, event.clientY);
-      mutate((state) => addBuilderPoint(state, point.x, point.y));
+      mutate((state) => {
+        const constrainedPoint = constrainNewPoint(state, point);
+        return addBuilderPoint(state, constrainedPoint.x, constrainedPoint.y);
+      });
       return;
     }
 
@@ -1262,8 +1366,8 @@ export default function CeilingBuilderDialog({
                 <Button variant="outlined" onClick={fitToScreen} startIcon={<FitScreenIcon />} sx={{ minHeight: 44 }}>
                   Вписать
                 </Button>
-                <Button
-                  variant={builder.viewState.showGrid ? 'contained' : 'outlined'}
+              <Button
+                variant={builder.viewState.showGrid ? 'contained' : 'outlined'}
                   onClick={() => setBuilder((prev) => ({
                     ...prev,
                     viewState: { ...prev.viewState, showGrid: !prev.viewState.showGrid },
@@ -1271,6 +1375,16 @@ export default function CeilingBuilderDialog({
                   sx={{ minWidth: 48, minHeight: 44 }}
                 >
                   <GridOnIcon />
+                </Button>
+                <Button
+                  variant={builder.viewState.orthoEnabled ? 'contained' : 'outlined'}
+                  onClick={() => setBuilder((prev) => ({
+                    ...prev,
+                    viewState: { ...prev.viewState, orthoEnabled: !prev.viewState.orthoEnabled },
+                  }))}
+                  sx={{ minHeight: 44 }}
+                >
+                  Орто
                 </Button>
                 <Button
                   variant={builder.viewState.showLabels ? 'contained' : 'outlined'}

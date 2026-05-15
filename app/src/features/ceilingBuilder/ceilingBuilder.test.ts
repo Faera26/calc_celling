@@ -62,6 +62,19 @@ describe('ceilingBuilder', () => {
     expect(synced.sketch.builderState?.points).toHaveLength(4);
   });
 
+  it('добавляет новые настройки viewState при чтении старого сохраненного builder', () => {
+    const sketch = createDefaultCeilingSketch(4000, 3000);
+    const savedState = createDefaultCeilingBuilderState('rectangle');
+    const legacyViewState = { ...savedState.viewState } as Partial<typeof savedState.viewState>;
+    delete legacyViewState.orthoEnabled;
+    sketch.builderState = {
+      ...savedState,
+      viewState: legacyViewState as typeof savedState.viewState,
+    };
+
+    expect(createBuilderStateFromSketch(sketch).viewState.orthoEnabled).toBe(false);
+  });
+
   it('помечает необходимость шва по ширине рулона', () => {
     const state = createDefaultCeilingBuilderState('rectangle');
     state.fabricSettings.texture = 'matte';

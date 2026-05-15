@@ -218,6 +218,7 @@ export interface CeilingBuilderViewState {
   panY: number;
   showGrid: boolean;
   showLabels: boolean;
+  orthoEnabled: boolean;
   selectedElementId: string | null;
   selectedElementType: 'point' | 'wall' | 'diagonal' | 'object' | 'seam' | null;
   activeMode: CeilingBuilderMode;

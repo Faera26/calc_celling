@@ -239,6 +239,7 @@ function defaultViewState() {
     panY: 0,
     showGrid: true,
     showLabels: true,
+    orthoEnabled: false,
     selectedElementId: null,
     selectedElementType: null,
     activeMode: 'shape' as const,
@@ -1096,6 +1097,10 @@ export function createBuilderStateFromSketch(
       ...sketch.builderState,
       roomId: roomId ?? sketch.builderState.roomId,
       calculationId: calculationId ?? sketch.builderState.calculationId,
+      viewState: {
+        ...defaultViewState(),
+        ...sketch.builderState.viewState,
+      },
     });
   }
 
