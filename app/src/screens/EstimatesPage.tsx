@@ -62,7 +62,7 @@ import {
   resolveEstimateSelectionId,
 } from '../features/estimates/estimateSelection';
 import ConfirmDialog from '../components/ConfirmDialog';
-import CeilingSketcher from '../components/CeilingSketcher';
+import CeilingBuilderDialog from '../components/CeilingBuilderDialog';
 import PdfColorPalette from '../components/PdfColorPalette';
 import { deleteEstimateDocument } from '../features/estimates/estimateCrud';
 import {
@@ -1203,7 +1203,7 @@ export default function EstimatesPage({ auth, settings }: EstimatesPageProps) {
                                     onClick={() => openRoomSketch(room.id)}
                                     sx={{ minHeight: 50, flex: 1 }}
                                   >
-                                    Открыть чертеж
+                                    {room.ceilingSketch?.builderState ? 'Редактировать потолок' : 'Построить потолок'}
                                   </Button>
                                   <Button
                                     size="large"
@@ -1619,35 +1619,18 @@ export default function EstimatesPage({ auth, settings }: EstimatesPageProps) {
       </ConfirmDialog>
 
       {editingRoomSketch && (
-        <Dialog open onClose={() => setEditingRoomSketchId(null)} maxWidth="xl" fullWidth fullScreen={isCompactLayout}>
-          <DialogTitle>Чертеж потолка: {editingRoomSketch.name}</DialogTitle>
-          <DialogContent dividers sx={{ p: { xs: 1, md: 2 }, bgcolor: 'grey.50' }}>
-            <CeilingSketcher
-              value={editingRoomSketch.ceilingSketch || createSketchFromSavedRoom(editingRoomSketch)}
-              onChange={(sketch, metrics) => updateRoomSketch(editingRoomSketch.id, sketch, metrics)}
-            />
-          </DialogContent>
-          <DialogActions
-            sx={{
-              px: { xs: 1.5, md: 3 },
-              py: 1.5,
-              position: 'sticky',
-              bottom: 0,
-              bgcolor: 'background.paper',
-              borderTop: '1px solid',
-              borderColor: 'divider',
-            }}
-          >
-            <Button
-              onClick={() => setEditingRoomSketchId(null)}
-              variant="contained"
-              size="large"
-              sx={{ minHeight: 50, width: { xs: '100%', sm: 'auto' } }}
-            >
-              Готово
-            </Button>
-          </DialogActions>
-        </Dialog>
+        <CeilingBuilderDialog
+          open
+          roomName={editingRoomSketch.name}
+          roomId={editingRoomSketch.id}
+          value={editingRoomSketch.ceilingSketch || createSketchFromSavedRoom(editingRoomSketch)}
+          onClose={() => setEditingRoomSketchId(null)}
+          onSaveDraft={(sketch, metrics) => updateRoomSketch(editingRoomSketch.id, sketch, metrics)}
+          onApply={(sketch, metrics) => {
+            updateRoomSketch(editingRoomSketch.id, sketch, metrics);
+            setEditingRoomSketchId(null);
+          }}
+        />
       )}
 
       {editingPosition && (

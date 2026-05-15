@@ -19,6 +19,26 @@ export type CeilingFixtureKind = 'spot' | 'chandelier' | 'vent' | 'sensor';
 export type CeilingObstacleKind = 'pipe' | 'riser' | 'column' | 'hood';
 export type CeilingLinearFeatureKind = 'light_line' | 'curtain_track' | 'niche' | 'profile' | 'level_edge';
 export type CeilingFabricTexture = 'matte' | 'satin' | 'gloss' | 'fabric';
+export type CeilingBuilderMode = 'shape' | 'dimensions' | 'diagonals' | 'objects' | 'fabric' | 'summary';
+export type CeilingShapeTemplate = 'rectangle' | 'l_shape' | 'u_shape' | 'polygon' | 'free';
+export type CeilingBuilderAngleType = 'inner' | 'outer' | 'straight';
+export type CeilingBuilderObjectType =
+  | 'pipe'
+  | 'chandelier'
+  | 'spotlight'
+  | 'spotlight_group'
+  | 'vent'
+  | 'cornice'
+  | 'niche'
+  | 'column'
+  | 'bypass'
+  | 'sensor'
+  | 'custom';
+export type CeilingBuilderMaterial = '' | 'pvc' | 'fabric' | 'other';
+export type CeilingBuilderTexture = '' | 'matte' | 'satin' | 'gloss' | 'fabric' | 'translucent' | 'photo' | 'other';
+export type CeilingBuilderOrientationMode = 'auto' | 'longest_wall' | 'wall' | 'manual';
+export type CeilingBuilderSeamMode = 'auto' | 'none' | 'manual';
+export type CeilingBuilderHarpoonType = '' | 'standard' | 'slim' | 'other';
 
 export interface CeilingSketchPointRef {
   xMm: number;
@@ -83,6 +103,7 @@ export interface CeilingSketch {
   obstacles: CeilingSketchObstacle[];
   linearFeatures: CeilingSketchLinearFeature[];
   fabric: CeilingFabricPlan;
+  builderState?: CeilingShapeBuilderState | null;
   updatedAt?: string;
 }
 
@@ -97,6 +118,164 @@ export interface CeilingSketchMetrics {
   nichesM: number;
   levels: number;
   seamsM: number;
+}
+
+export interface CeilingBuilderPoint {
+  id: string;
+  label: string;
+  x: number;
+  y: number;
+  locked: boolean;
+}
+
+export interface CeilingBuilderWall {
+  id: string;
+  fromPointId: string;
+  toPointId: string;
+  label: string;
+  lengthMm: number | null;
+  isMeasured: boolean;
+  comment: string;
+}
+
+export interface CeilingBuilderDiagonal {
+  id: string;
+  fromPointId: string;
+  toPointId: string;
+  label: string;
+  lengthMm: number | null;
+  comment: string;
+}
+
+export interface CeilingBuilderAngle {
+  id: string;
+  pointId: string;
+  degrees: number;
+  type: CeilingBuilderAngleType;
+  isManual: boolean;
+}
+
+export interface CeilingBuilderObject {
+  id: string;
+  type: CeilingBuilderObjectType;
+  x: number;
+  y: number;
+  endX?: number;
+  endY?: number;
+  diameterMm?: number;
+  widthMm?: number;
+  heightMm?: number;
+  lengthMm?: number;
+  quantity: number;
+  linkedWallId?: string;
+  linkedPointId?: string;
+  offsetFromWall1Mm?: number;
+  offsetFromWall2Mm?: number;
+  comment: string;
+  meta?: {
+    mountingType?: string;
+    platformDiameterMm?: number;
+    spotlightType?: string;
+    thermalRing?: boolean;
+    corniceType?: string;
+    nicheType?: string;
+    customLabel?: string;
+  };
+}
+
+export interface CeilingBuilderFabricSettings {
+  material: CeilingBuilderMaterial;
+  texture: CeilingBuilderTexture;
+  color: string;
+  manufacturer: string;
+  rollWidthMm: number | null;
+  orientationMode: CeilingBuilderOrientationMode;
+  orientationWallId: string | null;
+  orientationAngle: number | null;
+  seamMode: CeilingBuilderSeamMode;
+  allowanceMm: number;
+  shrinkPercent: number;
+  harpoonEnabled: boolean;
+  harpoonType: CeilingBuilderHarpoonType;
+  productionComment: string;
+}
+
+export interface CeilingBuilderSeam {
+  id: string;
+  startX: number;
+  startY: number;
+  endX: number;
+  endY: number;
+  offsetMm: number;
+  angle: number;
+  isManual: boolean;
+  comment: string;
+}
+
+export interface CeilingBuilderViewState {
+  zoom: number;
+  panX: number;
+  panY: number;
+  showGrid: boolean;
+  showLabels: boolean;
+  selectedElementId: string | null;
+  selectedElementType: 'point' | 'wall' | 'diagonal' | 'object' | 'seam' | null;
+  activeMode: CeilingBuilderMode;
+}
+
+export interface CeilingBuilderValidationIssue {
+  id: string;
+  severity: 'critical' | 'warning';
+  message: string;
+  relatedElementType?: CeilingBuilderViewState['selectedElementType'];
+  relatedElementId?: string;
+  actionMode?: CeilingBuilderMode;
+}
+
+export interface CeilingShapeBuilderState {
+  id: string;
+  roomId: string | null;
+  calculationId: string | null;
+  template: CeilingShapeTemplate;
+  isClosed: boolean;
+  points: CeilingBuilderPoint[];
+  walls: CeilingBuilderWall[];
+  diagonals: CeilingBuilderDiagonal[];
+  angles: CeilingBuilderAngle[];
+  objects: CeilingBuilderObject[];
+  fabricSettings: CeilingBuilderFabricSettings;
+  seams: CeilingBuilderSeam[];
+  viewState: CeilingBuilderViewState;
+  validationIssues: CeilingBuilderValidationIssue[];
+  notes: {
+    productionComment: string;
+    installerComment: string;
+    measurementComment: string;
+  };
+  updatedAt: string;
+}
+
+export interface CalculationTransferPayload {
+  areaM2: number;
+  perimeterM: number;
+  cornerCount: number;
+  wallCount: number;
+  innerCornerCount: number;
+  outerCornerCount: number;
+  walls: CeilingBuilderWall[];
+  diagonals: CeilingBuilderDiagonal[];
+  hasNonStandardAngles: boolean;
+  pipeCount: number;
+  chandelierCount: number;
+  spotlightCount: number;
+  corniceLengthM: number;
+  fabricSettings: CeilingBuilderFabricSettings;
+  objects: CeilingBuilderObject[];
+  notes: {
+    productionComment: string;
+    installerComment: string;
+    measurementComment: string;
+  };
 }
 
 export interface CatalogItem {
