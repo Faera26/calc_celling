@@ -125,7 +125,7 @@ const OBJECT_OPTIONS: Array<{ id: CeilingBuilderObjectType; label: string }> = [
 ];
 
 function cloneState(state: CeilingShapeBuilderState) {
-  return structuredClone(state);
+  return JSON.parse(JSON.stringify(state)) as CeilingShapeBuilderState;
 }
 
 function pointLabel(point: CeilingBuilderPoint | undefined) {
@@ -348,7 +348,7 @@ export default function CeilingBuilderDialog({
   }
 
   function undo() {
-    const previous = history.at(-1);
+    const previous = history[history.length - 1];
     if (!previous) return;
 
     setHistory((prev) => prev.slice(0, -1));
