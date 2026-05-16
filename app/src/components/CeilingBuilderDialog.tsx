@@ -71,6 +71,7 @@ import {
   removeBuilderObject,
   removeBuilderPoint,
   renameBuilderPoint,
+  snapCoordinateToNearestAxis,
   setBuilderPointLocked,
   setBuilderWallComment,
   setBuilderWallLength,
@@ -114,6 +115,18 @@ interface OrthoDragState {
   axis: 'x' | 'y' | null;
 }
 
+interface SnapGuide {
+  axis: 'x' | 'y';
+  value: number;
+}
+
+interface MagnifierState {
+  boxLeft: number;
+  boxTop: number;
+  worldX: number;
+  worldY: number;
+}
+
 interface CeilingBuilderDialogProps {
   open: boolean;
   roomName: string;
@@ -149,6 +162,11 @@ const OBJECT_OPTIONS: Array<{ id: CeilingBuilderObjectType; label: string }> = [
 ];
 
 const ORTHO_LOCK_THRESHOLD_MM = 40;
+const ORTHO_SNAP_THRESHOLD_MM = 80;
+const LONG_PRESS_DELAY_MS = 380;
+const LONG_PRESS_MOVE_TOLERANCE_PX = 10;
+const MAGNIFIER_SIZE_PX = 150;
+const MAGNIFIER_WORLD_SIZE_MM = 980;
 
 function cloneState(state: CeilingShapeBuilderState) {
   return JSON.parse(JSON.stringify(state)) as CeilingShapeBuilderState;
@@ -177,6 +195,16 @@ function viewBoxString(viewBox: ViewBoxState) {
 
 function clamp(value: number, min: number, max: number) {
   return Math.max(min, Math.min(max, value));
+}
+
+function capturePointerIfPossible(target: Element, pointerId: number) {
+  if (!('setPointerCapture' in target)) return;
+
+  try {
+    target.setPointerCapture(pointerId);
+  } catch {
+    // Some browsers reject capture for synthetic or already-ended pointers.
+  }
 }
 
 function pointToSegmentDistance(
@@ -264,14 +292,19 @@ export default function CeilingBuilderDialog({
   const [draftRegionPoints, setDraftRegionPoints] = useState<Array<Pick<CeilingBuilderPoint, 'x' | 'y'>>>([]);
   const [drawingRegion, setDrawingRegion] = useState(false);
   const [selectedPanelId, setSelectedPanelId] = useState('outer-panel');
+  const [snapGuide, setSnapGuide] = useState<SnapGuide | null>(null);
+  const [magnifier, setMagnifier] = useState<MagnifierState | null>(null);
   const surfaceRef = useRef<HTMLDivElement | null>(null);
   const svgRef = useRef<SVGSVGElement | null>(null);
   const dragTargetRef = useRef<DragTarget | null>(null);
   const dragStartStateRef = useRef<CeilingShapeBuilderState | null>(null);
+  const dragStartPointRef = useRef<{ x: number; y: number } | null>(null);
   const pendingDragPointRef = useRef<{ x: number; y: number } | null>(null);
   const dragRafRef = useRef<number | null>(null);
   const singlePanRef = useRef<SinglePanGesture | null>(null);
   const orthoDragRef = useRef<OrthoDragState | null>(null);
+  const longPressTimerRef = useRef<number | null>(null);
+  const longPressStartRef = useRef<{ pointerId: number; clientX: number; clientY: number } | null>(null);
   const pointersRef = useRef(new Map<number, { x: number; y: number }>());
   const gestureRef = useRef<{
     distance: number;
@@ -317,7 +350,11 @@ export default function CeilingBuilderDialog({
     window.addEventListener('orientationchange', updateViewportHeight);
 
     const surface = surfaceRef.current;
-    const preventTouchMove = (event: TouchEvent) => event.preventDefault();
+    const preventTouchMove = (event: TouchEvent) => {
+      const target = event.target instanceof Element ? event.target : null;
+      if (target?.closest('[data-builder-scrollable="true"]')) return;
+      event.preventDefault();
+    };
     surface?.addEventListener('touchmove', preventTouchMove, { passive: false });
 
     return () => {
@@ -338,6 +375,9 @@ export default function CeilingBuilderDialog({
   useEffect(() => () => {
     if (dragRafRef.current !== null) {
       cancelAnimationFrame(dragRafRef.current);
+    }
+    if (longPressTimerRef.current !== null) {
+      window.clearTimeout(longPressTimerRef.current);
     }
   }, []);
 
@@ -437,11 +477,106 @@ export default function CeilingBuilderDialog({
     return { x: Math.round(x), y: Math.round(y) };
   }
 
+  function clientPointInSurface(clientX: number, clientY: number) {
+    const rect = surfaceRef.current?.getBoundingClientRect();
+    if (!rect) return null;
+
+    return {
+      left: clientX - rect.left,
+      top: clientY - rect.top,
+      width: rect.width,
+      height: rect.height,
+    };
+  }
+
+  function clearLongPressTimer() {
+    if (longPressTimerRef.current !== null) {
+      window.clearTimeout(longPressTimerRef.current);
+      longPressTimerRef.current = null;
+    }
+  }
+
+  function hideMagnifier() {
+    clearLongPressTimer();
+    longPressStartRef.current = null;
+    setMagnifier(null);
+  }
+
+  function scheduleMagnifier(event: ReactPointerEvent<SVGElement>) {
+    if (event.pointerType === 'mouse') return;
+
+    clearLongPressTimer();
+    longPressStartRef.current = {
+      pointerId: event.pointerId,
+      clientX: event.clientX,
+      clientY: event.clientY,
+    };
+
+    longPressTimerRef.current = window.setTimeout(() => {
+      const localPoint = clientPointInSurface(event.clientX, event.clientY);
+      if (!localPoint) return;
+      const worldPoint = worldPointFromClient(event.clientX, event.clientY);
+      setMagnifier({
+        boxLeft: clamp(localPoint.left - MAGNIFIER_SIZE_PX / 2, 12, Math.max(12, localPoint.width - MAGNIFIER_SIZE_PX - 12)),
+        boxTop: clamp(localPoint.top - MAGNIFIER_SIZE_PX - 24, 12, Math.max(12, localPoint.height - MAGNIFIER_SIZE_PX - 12)),
+        worldX: worldPoint.x,
+        worldY: worldPoint.y,
+      });
+      longPressTimerRef.current = null;
+    }, LONG_PRESS_DELAY_MS);
+  }
+
+  function updateMagnifier(event: ReactPointerEvent<SVGElement>) {
+    const start = longPressStartRef.current;
+    if (start?.pointerId === event.pointerId && !magnifier) {
+      const moved = Math.hypot(event.clientX - start.clientX, event.clientY - start.clientY) > LONG_PRESS_MOVE_TOLERANCE_PX;
+      if (moved) {
+        hideMagnifier();
+      }
+      return;
+    }
+
+    if (!magnifier) return;
+    const localPoint = clientPointInSurface(event.clientX, event.clientY);
+    if (!localPoint) return;
+    const worldPoint = worldPointFromClient(event.clientX, event.clientY);
+    setMagnifier({
+      boxLeft: clamp(localPoint.left - MAGNIFIER_SIZE_PX / 2, 12, Math.max(12, localPoint.width - MAGNIFIER_SIZE_PX - 12)),
+      boxTop: clamp(localPoint.top - MAGNIFIER_SIZE_PX - 24, 12, Math.max(12, localPoint.height - MAGNIFIER_SIZE_PX - 12)),
+      worldX: worldPoint.x,
+      worldY: worldPoint.y,
+    });
+  }
+
+  function pointCollectionForTarget(target: DragTarget) {
+    if (target.kind === 'point') return builder.points;
+    if (target.kind === 'region-point' && target.regionId) {
+      return builder.fabricRegions.find((region) => region.id === target.regionId)?.points || [];
+    }
+    return [];
+  }
+
+  function neighborSnapCandidates(target: DragTarget, axis: 'x' | 'y') {
+    const points = pointCollectionForTarget(target);
+    const index = points.findIndex((point) => point.id === target.id);
+    if (index === -1 || points.length < 2) return [];
+
+    const previous = points[(index - 1 + points.length) % points.length];
+    const next = points[(index + 1) % points.length];
+    return [previous[axis], next[axis]];
+  }
+
   function constrainPointDrag(rawPoint: { x: number; y: number }, target: DragTarget) {
-    if ((target.kind !== 'point' && target.kind !== 'region-point') || !builder.viewState.orthoEnabled) return rawPoint;
+    if ((target.kind !== 'point' && target.kind !== 'region-point') || !builder.viewState.orthoEnabled) {
+      setSnapGuide(null);
+      return rawPoint;
+    }
 
     const orthoDrag = orthoDragRef.current;
-    if (!orthoDrag || orthoDrag.pointId !== target.id) return rawPoint;
+    if (!orthoDrag || orthoDrag.pointId !== target.id) {
+      setSnapGuide(null);
+      return rawPoint;
+    }
 
     const dx = rawPoint.x - orthoDrag.originX;
     const dy = rawPoint.y - orthoDrag.originY;
@@ -450,12 +585,27 @@ export default function CeilingBuilderDialog({
     }
 
     if (!orthoDrag.axis) {
+      setSnapGuide(null);
       return { x: orthoDrag.originX, y: orthoDrag.originY };
     }
 
-    return orthoDrag.axis === 'x'
-      ? { x: rawPoint.x, y: orthoDrag.originY }
-      : { x: orthoDrag.originX, y: rawPoint.y };
+    if (orthoDrag.axis === 'x') {
+      const snap = snapCoordinateToNearestAxis(
+        rawPoint.x,
+        neighborSnapCandidates(target, 'x'),
+        ORTHO_SNAP_THRESHOLD_MM
+      );
+      setSnapGuide(snap.snapped ? { axis: 'x', value: snap.value } : null);
+      return { x: snap.value, y: orthoDrag.originY };
+    }
+
+    const snap = snapCoordinateToNearestAxis(
+      rawPoint.y,
+      neighborSnapCandidates(target, 'y'),
+      ORTHO_SNAP_THRESHOLD_MM
+    );
+    setSnapGuide(snap.snapped ? { axis: 'y', value: snap.value } : null);
+    return { x: orthoDrag.originX, y: snap.value };
   }
 
   function constrainNewPoint(state: CeilingShapeBuilderState, rawPoint: { x: number; y: number }) {
@@ -464,9 +614,23 @@ export default function CeilingBuilderDialog({
     const previous = state.points[state.points.length - 1];
     const dx = rawPoint.x - previous.x;
     const dy = rawPoint.y - previous.y;
-    return Math.abs(dx) >= Math.abs(dy)
-      ? { x: rawPoint.x, y: previous.y }
-      : { x: previous.x, y: rawPoint.y };
+    if (Math.abs(dx) >= Math.abs(dy)) {
+      const snap = snapCoordinateToNearestAxis(
+        rawPoint.x,
+        state.points.slice(0, -1).map((point) => point.x),
+        ORTHO_SNAP_THRESHOLD_MM
+      );
+      setSnapGuide(snap.snapped ? { axis: 'x', value: snap.value } : null);
+      return { x: snap.value, y: previous.y };
+    }
+
+    const snap = snapCoordinateToNearestAxis(
+      rawPoint.y,
+      state.points.slice(0, -1).map((point) => point.y),
+      ORTHO_SNAP_THRESHOLD_MM
+    );
+    setSnapGuide(snap.snapped ? { axis: 'y', value: snap.value } : null);
+    return { x: previous.x, y: snap.value };
   }
 
   function constrainNewRegionPoint(rawPoint: { x: number; y: number }) {
@@ -475,9 +639,23 @@ export default function CeilingBuilderDialog({
     const previous = draftRegionPoints[draftRegionPoints.length - 1];
     const dx = rawPoint.x - previous.x;
     const dy = rawPoint.y - previous.y;
-    return Math.abs(dx) >= Math.abs(dy)
-      ? { x: rawPoint.x, y: previous.y }
-      : { x: previous.x, y: rawPoint.y };
+    if (Math.abs(dx) >= Math.abs(dy)) {
+      const snap = snapCoordinateToNearestAxis(
+        rawPoint.x,
+        draftRegionPoints.slice(0, -1).map((point) => point.x),
+        ORTHO_SNAP_THRESHOLD_MM
+      );
+      setSnapGuide(snap.snapped ? { axis: 'x', value: snap.value } : null);
+      return { x: snap.value, y: previous.y };
+    }
+
+    const snap = snapCoordinateToNearestAxis(
+      rawPoint.y,
+      draftRegionPoints.slice(0, -1).map((point) => point.y),
+      ORTHO_SNAP_THRESHOLD_MM
+    );
+    setSnapGuide(snap.snapped ? { axis: 'y', value: snap.value } : null);
+    return { x: previous.x, y: snap.value };
   }
 
   function scheduleDragUpdate() {
@@ -500,18 +678,26 @@ export default function CeilingBuilderDialog({
         }
 
         const originalObject = dragStartStateRef.current?.objects.find((object) => object.id === target.id);
+        const dragStartPoint = dragStartPointRef.current;
+        if (!originalObject || !dragStartPoint) {
+          return prev;
+        }
+
+        const deltaX = constrainedPoint.x - dragStartPoint.x;
+        const deltaY = constrainedPoint.y - dragStartPoint.y;
         if (originalObject?.endX !== undefined && originalObject.endY !== undefined) {
-          const deltaX = constrainedPoint.x - originalObject.x;
-          const deltaY = constrainedPoint.y - originalObject.y;
           return updateBuilderObject(prev, target.id, {
-            x: constrainedPoint.x,
-            y: constrainedPoint.y,
+            x: originalObject.x + deltaX,
+            y: originalObject.y + deltaY,
             endX: originalObject.endX + deltaX,
             endY: originalObject.endY + deltaY,
           });
         }
 
-        return updateBuilderObject(prev, target.id, { x: constrainedPoint.x, y: constrainedPoint.y });
+        return updateBuilderObject(prev, target.id, {
+          x: originalObject.x + deltaX,
+          y: originalObject.y + deltaY,
+        });
       });
     });
   }
@@ -519,10 +705,12 @@ export default function CeilingBuilderDialog({
   function startDrag(event: ReactPointerEvent<SVGElement>, target: DragTarget) {
     event.preventDefault();
     event.stopPropagation();
+    scheduleMagnifier(event);
     dragTargetRef.current = target;
     dragStartStateRef.current = cloneState(builder);
     setFrozenViewBox(buildViewBox(builder));
-    pendingDragPointRef.current = worldPointFromClient(event.clientX, event.clientY);
+    dragStartPointRef.current = worldPointFromClient(event.clientX, event.clientY);
+    pendingDragPointRef.current = dragStartPointRef.current;
     if (target.kind === 'point' || target.kind === 'region-point') {
       const currentPoint = target.kind === 'point'
         ? builder.points.find((point) => point.id === target.id)
@@ -551,7 +739,7 @@ export default function CeilingBuilderDialog({
     if (builder.viewState.activeMode === 'shape') {
       setSheetState('collapsed');
     }
-    event.currentTarget.setPointerCapture(event.pointerId);
+    capturePointerIfPossible(event.currentTarget, event.pointerId);
   }
 
   function finishDrag() {
@@ -562,9 +750,12 @@ export default function CeilingBuilderDialog({
 
     dragTargetRef.current = null;
     dragStartStateRef.current = null;
+    dragStartPointRef.current = null;
     setFrozenViewBox(null);
     pendingDragPointRef.current = null;
     orthoDragRef.current = null;
+    setSnapGuide(null);
+    hideMagnifier();
   }
 
   function beginGestureIfNeeded() {
@@ -591,7 +782,12 @@ export default function CeilingBuilderDialog({
       setSheetState('collapsed');
     }
     pointersRef.current.set(event.pointerId, { x: event.clientX, y: event.clientY });
-    event.currentTarget.setPointerCapture(event.pointerId);
+    if (pointersRef.current.size <= 1) {
+      scheduleMagnifier(event);
+    } else {
+      hideMagnifier();
+    }
+    capturePointerIfPossible(event.currentTarget, event.pointerId);
     tapStartRef.current = { x: event.clientX, y: event.clientY, moved: false };
     if (pointersRef.current.size === 1) {
       singlePanRef.current = {
@@ -608,6 +804,7 @@ export default function CeilingBuilderDialog({
 
   function handleCanvasPointerMove(event: ReactPointerEvent<SVGSVGElement>) {
     event.preventDefault();
+    updateMagnifier(event);
     if (dragTargetRef.current) {
       pendingDragPointRef.current = worldPointFromClient(event.clientX, event.clientY);
       scheduleDragUpdate();
@@ -625,6 +822,7 @@ export default function CeilingBuilderDialog({
     }
 
     if (pointersRef.current.size === 2 && gestureRef.current) {
+      hideMagnifier();
       const [first, second] = [...pointersRef.current.values()];
       const distance = Math.hypot(second.x - first.x, second.y - first.y);
       const centerX = (first.x + second.x) / 2;
@@ -672,6 +870,7 @@ export default function CeilingBuilderDialog({
 
   function handleCanvasPointerUp(event: ReactPointerEvent<SVGSVGElement>) {
     event.preventDefault();
+    hideMagnifier();
     pointersRef.current.delete(event.pointerId);
 
     if (dragTargetRef.current) {
@@ -688,11 +887,15 @@ export default function CeilingBuilderDialog({
 
     const wasTap = tapStartRef.current && !tapStartRef.current.moved;
     tapStartRef.current = null;
-    if (!wasTap) return;
+    if (!wasTap) {
+      setSnapGuide(null);
+      return;
+    }
 
     if (builder.viewState.activeMode === 'shape' && drawingRegion) {
       const point = constrainNewRegionPoint(worldPointFromClient(event.clientX, event.clientY));
       setDraftRegionPoints((prev) => [...prev, point]);
+      setSnapGuide(null);
       return;
     }
 
@@ -702,10 +905,12 @@ export default function CeilingBuilderDialog({
         const constrainedPoint = constrainNewPoint(state, point);
         return addBuilderPoint(state, constrainedPoint.x, constrainedPoint.y);
       });
+      setSnapGuide(null);
       return;
     }
 
     selectElement(null, null);
+    setSnapGuide(null);
   }
 
   function moveSelectedPointBy(dx: number, dy: number) {
@@ -794,6 +999,7 @@ export default function CeilingBuilderDialog({
           <Stack
             direction="row"
             spacing={1}
+            data-builder-scrollable="true"
             sx={{
               overflowX: 'auto',
               WebkitOverflowScrolling: 'touch',
@@ -1555,6 +1761,7 @@ export default function CeilingBuilderDialog({
               <Stack
                 direction="row"
                 spacing={1}
+                data-builder-scrollable="true"
                 sx={{
                   pointerEvents: 'auto',
                   maxWidth: 'calc(100vw - 116px)',
@@ -1609,6 +1816,7 @@ export default function CeilingBuilderDialog({
             </Box>
 
             <svg
+              data-testid="ceiling-builder-canvas"
               ref={svgRef}
               viewBox={viewBoxString(viewBox)}
               preserveAspectRatio="xMidYMid meet"
@@ -1641,6 +1849,19 @@ export default function CeilingBuilderDialog({
                   width={viewBox.width}
                   height={viewBox.height}
                   fill="url(#builder-grid)"
+                />
+              )}
+
+              {snapGuide && (
+                <line
+                  data-testid="ceiling-builder-snap-guide"
+                  x1={snapGuide.axis === 'x' ? snapGuide.value : viewBox.x}
+                  y1={snapGuide.axis === 'x' ? viewBox.y : snapGuide.value}
+                  x2={snapGuide.axis === 'x' ? snapGuide.value : viewBox.x + viewBox.width}
+                  y2={snapGuide.axis === 'x' ? viewBox.y + viewBox.height : snapGuide.value}
+                  stroke="#f97316"
+                  strokeWidth="18"
+                  strokeDasharray="42 28"
                 />
               )}
 
@@ -1847,15 +2068,29 @@ export default function CeilingBuilderDialog({
                 return (
                   <g key={object.id}>
                     {object.endX !== undefined && object.endY !== undefined && (
-                      <line
-                        x1={object.x}
-                        y1={object.y}
-                        x2={object.endX}
-                        y2={object.endY}
-                        stroke={isSelected ? '#2563eb' : '#0f766e'}
-                        strokeWidth="26"
-                        strokeLinecap="round"
-                      />
+                      <>
+                        <line
+                          data-testid={`linear-object-hit-${object.id}`}
+                          x1={object.x}
+                          y1={object.y}
+                          x2={object.endX}
+                          y2={object.endY}
+                          stroke="transparent"
+                          strokeWidth="150"
+                          strokeLinecap="round"
+                          onPointerDown={(event) => startDrag(event, { kind: 'object', id: object.id })}
+                        />
+                        <line
+                          x1={object.x}
+                          y1={object.y}
+                          x2={object.endX}
+                          y2={object.endY}
+                          stroke={isSelected ? '#2563eb' : '#0f766e'}
+                          strokeWidth="26"
+                          strokeLinecap="round"
+                          pointerEvents="none"
+                        />
+                      </>
                     )}
                     <circle
                       cx={object.x}
@@ -1866,6 +2101,17 @@ export default function CeilingBuilderDialog({
                       strokeWidth="24"
                       onPointerDown={(event) => startDrag(event, { kind: 'object', id: object.id })}
                     />
+                    {object.endX !== undefined && object.endY !== undefined && (
+                      <circle
+                        cx={object.endX}
+                        cy={object.endY}
+                        r={radius}
+                        fill={isSelected ? '#bfdbfe' : '#ffffff'}
+                        stroke={isSelected ? '#2563eb' : '#0f766e'}
+                        strokeWidth="24"
+                        onPointerDown={(event) => startDrag(event, { kind: 'object', id: object.id })}
+                      />
+                    )}
                     {builder.viewState.showLabels && (
                       <text x={object.x} y={object.y - radius - 42} textAnchor="middle" fontSize="58" fill="#0f172a">
                         {objectLabel(object)}
@@ -1903,6 +2149,157 @@ export default function CeilingBuilderDialog({
                 );
               })}
             </svg>
+
+            {magnifier && (
+              <Box
+                data-testid="ceiling-builder-magnifier"
+                sx={{
+                  position: 'absolute',
+                  left: magnifier.boxLeft,
+                  top: magnifier.boxTop,
+                  width: MAGNIFIER_SIZE_PX,
+                  height: MAGNIFIER_SIZE_PX,
+                  borderRadius: '50%',
+                  overflow: 'hidden',
+                  border: '3px solid #2563eb',
+                  boxShadow: '0 14px 32px rgba(15, 23, 42, 0.28)',
+                  bgcolor: '#ffffff',
+                  zIndex: 4,
+                  pointerEvents: 'none',
+                }}
+              >
+                <svg
+                  viewBox={`${magnifier.worldX - MAGNIFIER_WORLD_SIZE_MM / 2} ${magnifier.worldY - MAGNIFIER_WORLD_SIZE_MM / 2} ${MAGNIFIER_WORLD_SIZE_MM} ${MAGNIFIER_WORLD_SIZE_MM}`}
+                  width="100%"
+                  height="100%"
+                >
+                  <defs>
+                    <pattern id="magnifier-grid" width="100" height="100" patternUnits="userSpaceOnUse">
+                      <path d="M 100 0 L 0 0 0 100" fill="none" stroke="#d9e2ec" strokeWidth="1" />
+                    </pattern>
+                  </defs>
+                  {builder.viewState.showGrid && (
+                    <rect
+                      x={magnifier.worldX - MAGNIFIER_WORLD_SIZE_MM / 2}
+                      y={magnifier.worldY - MAGNIFIER_WORLD_SIZE_MM / 2}
+                      width={MAGNIFIER_WORLD_SIZE_MM}
+                      height={MAGNIFIER_WORLD_SIZE_MM}
+                      fill="url(#magnifier-grid)"
+                    />
+                  )}
+                  {builder.isClosed && builder.points.length >= 3 && (
+                    <polygon
+                      points={builder.points.map((point) => `${point.x},${point.y}`).join(' ')}
+                      fill="#dbeafe"
+                      stroke="#17202a"
+                      strokeWidth="28"
+                      strokeLinejoin="round"
+                    />
+                  )}
+                  {builder.fabricRegions.map((region, index) => {
+                    const fills = ['#fee2e2', '#dcfce7', '#fef3c7', '#ede9fe'];
+                    return (
+                      <polygon
+                        key={`magnifier-region-${region.id}`}
+                        points={region.points.map((point) => `${point.x},${point.y}`).join(' ')}
+                        fill={fills[index % fills.length]}
+                        stroke="#0f766e"
+                        strokeWidth="22"
+                        strokeLinejoin="round"
+                      />
+                    );
+                  })}
+                  {drawingRegion && draftRegionPoints.length > 0 && (
+                    <polyline
+                      points={draftRegionPoints.map((point) => `${point.x},${point.y}`).join(' ')}
+                      fill="none"
+                      stroke="#f97316"
+                      strokeWidth="24"
+                      strokeDasharray="42 24"
+                      strokeLinejoin="round"
+                      strokeLinecap="round"
+                    />
+                  )}
+                  {builder.objects.map((object) => {
+                    const radius = object.type === 'cornice' || object.type === 'niche'
+                      ? 42
+                      : Math.max(55, (object.diameterMm || 80) / 2);
+
+                    return (
+                      <g key={`magnifier-object-${object.id}`}>
+                        {object.endX !== undefined && object.endY !== undefined && (
+                          <line
+                            x1={object.x}
+                            y1={object.y}
+                            x2={object.endX}
+                            y2={object.endY}
+                            stroke="#0f766e"
+                            strokeWidth="26"
+                            strokeLinecap="round"
+                          />
+                        )}
+                        <circle
+                          cx={object.x}
+                          cy={object.y}
+                          r={radius}
+                          fill="#ffffff"
+                          stroke="#0f766e"
+                          strokeWidth="24"
+                        />
+                        {object.endX !== undefined && object.endY !== undefined && (
+                          <circle
+                            cx={object.endX}
+                            cy={object.endY}
+                            r={radius}
+                            fill="#ffffff"
+                            stroke="#0f766e"
+                            strokeWidth="24"
+                          />
+                        )}
+                      </g>
+                    );
+                  })}
+                  {builder.points.map((point) => (
+                    <circle
+                      key={`magnifier-point-${point.id}`}
+                      cx={point.x}
+                      cy={point.y}
+                      r="76"
+                      fill="#ffffff"
+                      stroke="#17202a"
+                      strokeWidth="24"
+                    />
+                  ))}
+                  {snapGuide && (
+                    <line
+                      x1={snapGuide.axis === 'x' ? snapGuide.value : magnifier.worldX - MAGNIFIER_WORLD_SIZE_MM / 2}
+                      y1={snapGuide.axis === 'x' ? magnifier.worldY - MAGNIFIER_WORLD_SIZE_MM / 2 : snapGuide.value}
+                      x2={snapGuide.axis === 'x' ? snapGuide.value : magnifier.worldX + MAGNIFIER_WORLD_SIZE_MM / 2}
+                      y2={snapGuide.axis === 'x' ? magnifier.worldY + MAGNIFIER_WORLD_SIZE_MM / 2 : snapGuide.value}
+                      stroke="#f97316"
+                      strokeWidth="18"
+                      strokeDasharray="42 28"
+                    />
+                  )}
+                  <line
+                    x1={magnifier.worldX - 120}
+                    y1={magnifier.worldY}
+                    x2={magnifier.worldX + 120}
+                    y2={magnifier.worldY}
+                    stroke="#dc2626"
+                    strokeWidth="18"
+                  />
+                  <line
+                    x1={magnifier.worldX}
+                    y1={magnifier.worldY - 120}
+                    x2={magnifier.worldX}
+                    y2={magnifier.worldY + 120}
+                    stroke="#dc2626"
+                    strokeWidth="18"
+                  />
+                </svg>
+              </Box>
+            )}
 
             <Box
               sx={{
@@ -1976,7 +2373,7 @@ export default function CeilingBuilderDialog({
                 </Stack>
               </Box>
               {sheetState !== 'collapsed' && (
-                <Box sx={{ p: 1.5, overflowY: 'auto', minHeight: 0 }}>
+                <Box data-builder-scrollable="true" sx={{ p: 1.5, overflowY: 'auto', minHeight: 0 }}>
                   {renderPanel()}
                 </Box>
               )}
@@ -1984,6 +2381,8 @@ export default function CeilingBuilderDialog({
           </Box>
 
           <Box
+            data-testid="ceiling-builder-mode-strip"
+            data-builder-scrollable="true"
             sx={{
               px: 0.75,
               pb: 'calc(env(safe-area-inset-bottom) + 8px)',

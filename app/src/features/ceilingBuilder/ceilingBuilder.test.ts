@@ -12,6 +12,7 @@ import {
   calculateFabricPanels,
   fabricNeedsSeam,
   parseDimensionInput,
+  snapCoordinateToNearestAxis,
   setBuilderWallLength,
   syncBuilderIntoSketch,
   validateBuilderState,
@@ -122,5 +123,18 @@ describe('ceilingBuilder', () => {
 
     expect(state.fabricRegions).toHaveLength(1);
     expect(calculateFabricPanels(state)).toHaveLength(2);
+  });
+
+  it('привязывает координату к ближайшей оси только внутри порога', () => {
+    expect(snapCoordinateToNearestAxis(1190, [800, 1200, 2400])).toEqual({
+      value: 1200,
+      snapped: true,
+      target: 1200,
+    });
+    expect(snapCoordinateToNearestAxis(1330, [800, 1200, 2400])).toEqual({
+      value: 1330,
+      snapped: false,
+      target: null,
+    });
   });
 });

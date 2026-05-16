@@ -137,6 +137,22 @@ export function fabricRegionCentroid(region: CeilingBuilderFabricRegion) {
   return polygonCentroid(region.points);
 }
 
+export function snapCoordinateToNearestAxis(
+  value: number,
+  candidates: number[],
+  thresholdMm = 80
+) {
+  const nearest = candidates.reduce<number | null>((best, candidate) => {
+    if (Math.abs(candidate - value) > thresholdMm) return best;
+    if (best === null) return candidate;
+    return Math.abs(candidate - value) < Math.abs(best - value) ? candidate : best;
+  }, null);
+
+  return nearest === null
+    ? { value, snapped: false, target: null }
+    : { value: nearest, snapped: true, target: nearest };
+}
+
 function orientation(
   first: Pick<CeilingBuilderPoint, 'x' | 'y'>,
   second: Pick<CeilingBuilderPoint, 'x' | 'y'>,
