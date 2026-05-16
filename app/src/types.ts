@@ -212,6 +212,24 @@ export interface CeilingBuilderSeam {
   comment: string;
 }
 
+export interface CeilingBuilderFabricRegion {
+  id: string;
+  label: string;
+  points: CeilingBuilderPoint[];
+  source: 'manual' | 'cornice';
+  sourceObjectId?: string | null;
+  comment: string;
+}
+
+export interface CeilingBuilderFabricPanel {
+  id: string;
+  label: string;
+  areaM2: number;
+  grossAreaM2: number;
+  isOuter: boolean;
+  sourceRegionId: string | null;
+}
+
 export interface CeilingBuilderViewState {
   zoom: number;
   panX: number;
@@ -220,7 +238,7 @@ export interface CeilingBuilderViewState {
   showLabels: boolean;
   orthoEnabled: boolean;
   selectedElementId: string | null;
-  selectedElementType: 'point' | 'wall' | 'diagonal' | 'object' | 'seam' | null;
+  selectedElementType: 'point' | 'wall' | 'diagonal' | 'object' | 'seam' | 'region' | null;
   activeMode: CeilingBuilderMode;
 }
 
@@ -246,6 +264,7 @@ export interface CeilingShapeBuilderState {
   objects: CeilingBuilderObject[];
   fabricSettings: CeilingBuilderFabricSettings;
   seams: CeilingBuilderSeam[];
+  fabricRegions: CeilingBuilderFabricRegion[];
   viewState: CeilingBuilderViewState;
   validationIssues: CeilingBuilderValidationIssue[];
   notes: {
@@ -271,6 +290,9 @@ export interface CalculationTransferPayload {
   spotlightCount: number;
   corniceLengthM: number;
   fabricSettings: CeilingBuilderFabricSettings;
+  fabricRegions: CeilingBuilderFabricRegion[];
+  fabricPanels: CeilingBuilderFabricPanel[];
+  fabricPanelCount: number;
   objects: CeilingBuilderObject[];
   notes: {
     productionComment: string;

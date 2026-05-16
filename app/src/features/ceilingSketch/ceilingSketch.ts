@@ -11,16 +11,13 @@ import type {
   CeilingSketchFixture,
   EstimateSettingsSnapshot,
 } from '../../types';
+import { createClientId } from '../../clientId';
 
 const DEFAULT_WIDTH_MM = 4200;
 const DEFAULT_DEPTH_MM = 3200;
 
 function id(prefix: string) {
-  if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) {
-    return `${prefix}-${crypto.randomUUID()}`;
-  }
-
-  return `${prefix}-${Math.random().toString(36).slice(2, 10)}`;
+  return createClientId(prefix);
 }
 
 function point(pointId: string, xMm: number, yMm: number): CeilingSketchPoint {

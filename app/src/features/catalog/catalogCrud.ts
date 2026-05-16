@@ -2,6 +2,7 @@ import { supabase } from '../../supabaseClient';
 import { restCount } from '../../supabaseRest';
 import type { CatalogItem, CatalogType, ItemForm, UzelItem } from '../../types';
 import { categoryId, tableOf } from '../../utils';
+import { createClientId } from '../../clientId';
 
 export type CatalogDialogMode = 'create' | 'edit';
 
@@ -100,7 +101,7 @@ export function buildCatalogPayload<T extends CatalogType>(
 ): BuildCatalogPayloadResult<T> {
   const categoryPath = normalizeCategoryPath(form.category, form.subcategory);
   const basePayload: CatalogPayloadBase = {
-    id: normalizeText(form.id) || existingItem?.id || crypto.randomUUID(),
+    id: normalizeText(form.id) || existingItem?.id || createClientId(),
     name: normalizeText(form.name),
     category: categoryPath.category,
     subcategory: categoryPath.subcategory,

@@ -3,6 +3,8 @@ import type {
   CeilingBuilderAngle,
   CeilingBuilderDiagonal,
   CeilingBuilderFabricSettings,
+  CeilingBuilderFabricPanel,
+  CeilingBuilderFabricRegion,
   CeilingBuilderObject,
   CeilingBuilderObjectType,
   CeilingBuilderPoint,
@@ -21,17 +23,14 @@ import {
   calculateCeilingSketchMetrics,
   createDefaultCeilingSketch,
 } from '../ceilingSketch/ceilingSketch';
+import { createClientId } from '../../clientId';
 
 const DEFAULT_WIDTH_MM = 4200;
 const DEFAULT_DEPTH_MM = 3200;
 const DEFAULT_MARGIN_MM = 500;
 
 function id(prefix: string) {
-  if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) {
-    return `${prefix}-${crypto.randomUUID()}`;
-  }
-
-  return `${prefix}-${Math.random().toString(36).slice(2, 10)}`;
+  return createClientId(prefix);
 }
 
 function round(value: number, digits = 2) {
@@ -74,6 +73,132 @@ function polygonSignedArea(points: CeilingBuilderPoint[]) {
 
 function polygonAreaMm2(points: CeilingBuilderPoint[]) {
   return Math.abs(polygonSignedArea(points));
+}
+
+function polygonContainsPoint(points: CeilingBuilderPoint[], x: number, y: number) {
+  if (points.length < 3) return false;
+
+  let inside = false;
+  for (let index = 0, previousIndex = points.length - 1; index < points.length; previousIndex = index, index += 1) {
+    const current = points[index];
+    const previous = points[previousIndex];
+    const intersects = ((current.y > y) !== (previous.y > y))
+      && (x < ((previous.x - current.x) * (y - current.y)) / (previous.y - current.y || 1) + current.x);
+    if (intersects) inside = !inside;
+  }
+
+  return inside;
+}
+
+function regionLabel(index: number) {
+  return `Полотно ${index + 2}`;
+}
+
+function buildRegionPoints(points: Array<Pick<CeilingBuilderPoint, 'x' | 'y'>>) {
+  return points.map((pointValue, index) => point(
+    nextPointLabel(index),
+    pointValue.x,
+    pointValue.y,
+    id('region-point')
+  ));
+}
+
+function polygonCentroid(points: CeilingBuilderPoint[]) {
+  if (points.length === 0) return { x: 0, y: 0 };
+
+  const area = polygonSignedArea(points);
+  if (Math.abs(area) < 1) {
+    const totals = points.reduce((acc, pointValue) => ({
+      x: acc.x + pointValue.x,
+      y: acc.y + pointValue.y,
+    }), { x: 0, y: 0 });
+    return {
+      x: Math.round(totals.x / points.length),
+      y: Math.round(totals.y / points.length),
+    };
+  }
+
+  let x = 0;
+  let y = 0;
+  points.forEach((current, index) => {
+    const next = points[(index + 1) % points.length];
+    const cross = current.x * next.y - next.x * current.y;
+    x += (current.x + next.x) * cross;
+    y += (current.y + next.y) * cross;
+  });
+
+  return {
+    x: Math.round(x / (6 * area)),
+    y: Math.round(y / (6 * area)),
+  };
+}
+
+export function fabricRegionCentroid(region: CeilingBuilderFabricRegion) {
+  return polygonCentroid(region.points);
+}
+
+function orientation(
+  first: Pick<CeilingBuilderPoint, 'x' | 'y'>,
+  second: Pick<CeilingBuilderPoint, 'x' | 'y'>,
+  third: Pick<CeilingBuilderPoint, 'x' | 'y'>
+) {
+  return Math.sign((second.y - first.y) * (third.x - second.x) - (second.x - first.x) * (third.y - second.y));
+}
+
+function segmentsIntersect(
+  firstStart: Pick<CeilingBuilderPoint, 'x' | 'y'>,
+  firstEnd: Pick<CeilingBuilderPoint, 'x' | 'y'>,
+  secondStart: Pick<CeilingBuilderPoint, 'x' | 'y'>,
+  secondEnd: Pick<CeilingBuilderPoint, 'x' | 'y'>
+) {
+  const o1 = orientation(firstStart, firstEnd, secondStart);
+  const o2 = orientation(firstStart, firstEnd, secondEnd);
+  const o3 = orientation(secondStart, secondEnd, firstStart);
+  const o4 = orientation(secondStart, secondEnd, firstEnd);
+
+  return o1 !== o2 && o3 !== o4;
+}
+
+function polygonsOverlap(first: CeilingBuilderPoint[], second: CeilingBuilderPoint[]) {
+  if (first.some((pointValue) => polygonContainsPoint(second, pointValue.x, pointValue.y))) return true;
+  if (second.some((pointValue) => polygonContainsPoint(first, pointValue.x, pointValue.y))) return true;
+
+  return first.some((current, index) => {
+    const next = first[(index + 1) % first.length];
+    return second.some((otherCurrent, otherIndex) => {
+      const otherNext = second[(otherIndex + 1) % second.length];
+      return segmentsIntersect(current, next, otherCurrent, otherNext);
+    });
+  });
+}
+
+function corniceRegionRawPoints(state: CeilingShapeBuilderState, object: CeilingBuilderObject) {
+  const wall = state.walls.find((item) => item.id === object.linkedWallId);
+  const from = state.points.find((pointValue) => pointValue.id === wall?.fromPointId);
+  const to = state.points.find((pointValue) => pointValue.id === wall?.toPointId);
+
+  if (object.type !== 'cornice' || object.endX === undefined || object.endY === undefined || !from || !to) {
+    return null;
+  }
+
+  return [
+    { x: from.x, y: from.y },
+    { x: to.x, y: to.y },
+    { x: object.endX, y: object.endY },
+    { x: object.x, y: object.y },
+  ];
+}
+
+function updateRegionPoints(
+  region: CeilingBuilderFabricRegion,
+  rawPoints: Array<Pick<CeilingBuilderPoint, 'x' | 'y'>>
+) {
+  return rawPoints.map((pointValue, index) => {
+    const previous = region.points[index];
+    return previous
+      ? { ...previous, x: Math.round(pointValue.x), y: Math.round(pointValue.y) }
+      : point(nextPointLabel(index), pointValue.x, pointValue.y, id('region-point'));
+  });
 }
 
 function polygonPerimeterMm(points: CeilingBuilderPoint[], isClosed: boolean) {
@@ -291,6 +416,29 @@ function nearestWall(
   return bestWall;
 }
 
+function inwardOffsetForWall(
+  state: CeilingShapeBuilderState,
+  from: CeilingBuilderPoint,
+  to: CeilingBuilderPoint,
+  offsetMm: number
+) {
+  const dx = to.x - from.x;
+  const dy = to.y - from.y;
+  const length = Math.max(1, Math.hypot(dx, dy));
+  const normal = { x: -dy / length, y: dx / length };
+  const midpoint = { x: (from.x + to.x) / 2, y: (from.y + to.y) / 2 };
+  const firstCandidate = {
+    x: midpoint.x + normal.x * offsetMm,
+    y: midpoint.y + normal.y * offsetMm,
+  };
+  const direction = pointInsideContour(state, firstCandidate.x, firstCandidate.y) ? 1 : -1;
+
+  return {
+    x: Math.round(normal.x * offsetMm * direction),
+    y: Math.round(normal.y * offsetMm * direction),
+  };
+}
+
 export function createDefaultCeilingBuilderState(
   template: CeilingShapeTemplate = 'rectangle',
   roomId: string | null = null,
@@ -313,6 +461,7 @@ export function createDefaultCeilingBuilderState(
     objects: [],
     fabricSettings: buildDefaultFabricSettings(),
     seams: [],
+    fabricRegions: [],
     viewState: defaultViewState(),
     validationIssues: [],
     notes: {
@@ -340,6 +489,7 @@ export function applyTemplate(
     walls,
     diagonals: [],
     angles: buildAngles(points, isClosed),
+    fabricRegions: [],
     viewState: {
       ...state.viewState,
       selectedElementId: null,
@@ -605,11 +755,12 @@ export function addBuilderObject(
     const from = state.points.find((pointValue) => pointValue.id === wall?.fromPointId);
     const to = state.points.find((pointValue) => pointValue.id === wall?.toPointId);
     if (wall && from && to) {
+      const offset = inwardOffsetForWall(state, from, to, type === 'cornice' ? 250 : 180);
       object.linkedWallId = wall.id;
-      object.x = from.x;
-      object.y = from.y;
-      object.endX = to.x;
-      object.endY = to.y;
+      object.x = from.x + offset.x;
+      object.y = from.y + offset.y;
+      object.endX = to.x + offset.x;
+      object.endY = to.y + offset.y;
       object.lengthMm = wall.lengthMm ?? Math.round(distanceMm(from, to));
     }
   }
@@ -652,9 +803,18 @@ export function updateBuilderObject(
     return next;
   });
 
+  const nextFabricRegions = state.fabricRegions.map((region) => {
+    if (region.sourceObjectId !== objectId || region.source !== 'cornice') return region;
+
+    const object = nextObjects.find((nextObject) => nextObject.id === objectId);
+    const rawPoints = object ? corniceRegionRawPoints(state, object) : null;
+    return rawPoints ? { ...region, points: updateRegionPoints(region, rawPoints) } : region;
+  });
+
   return withValidation({
     ...state,
     objects: nextObjects,
+    fabricRegions: nextFabricRegions,
     updatedAt: new Date().toISOString(),
   });
 }
@@ -742,9 +902,115 @@ export function updateBuilderNotes(
   });
 }
 
-export function calculateBuilderBounds(state: Pick<CeilingShapeBuilderState, 'points' | 'objects' | 'seams'>) {
+export function addBuilderFabricRegion(
+  state: CeilingShapeBuilderState,
+  rawPoints: Array<Pick<CeilingBuilderPoint, 'x' | 'y'>>,
+  source: CeilingBuilderFabricRegion['source'] = 'manual',
+  sourceObjectId: string | null = null
+): CeilingShapeBuilderState {
+  if (rawPoints.length < 3) return state;
+
+  const region: CeilingBuilderFabricRegion = {
+    id: id('region'),
+    label: regionLabel(state.fabricRegions.length),
+    points: buildRegionPoints(rawPoints),
+    source,
+    sourceObjectId,
+    comment: '',
+  };
+
+  return withValidation({
+    ...state,
+    fabricRegions: [...state.fabricRegions, region],
+    viewState: {
+      ...state.viewState,
+      selectedElementType: 'region',
+      selectedElementId: region.id,
+    },
+    updatedAt: new Date().toISOString(),
+  });
+}
+
+export function updateBuilderFabricRegion(
+  state: CeilingShapeBuilderState,
+  regionId: string,
+  patch: Partial<Pick<CeilingBuilderFabricRegion, 'label' | 'comment'>>
+): CeilingShapeBuilderState {
+  return withValidation({
+    ...state,
+    fabricRegions: state.fabricRegions.map((region) => (
+      region.id === regionId ? { ...region, ...patch } : region
+    )),
+    updatedAt: new Date().toISOString(),
+  });
+}
+
+export function moveBuilderFabricRegionPoint(
+  state: CeilingShapeBuilderState,
+  regionId: string,
+  pointId: string,
+  x: number,
+  y: number
+): CeilingShapeBuilderState {
+  return withValidation({
+    ...state,
+    fabricRegions: state.fabricRegions.map((region) => (
+      region.id === regionId
+        ? {
+          ...region,
+          points: region.points.map((regionPoint) => (
+            regionPoint.id === pointId
+              ? { ...regionPoint, x: Math.round(x), y: Math.round(y) }
+              : regionPoint
+          )),
+        }
+        : region
+    )),
+    updatedAt: new Date().toISOString(),
+  });
+}
+
+export function removeBuilderFabricRegion(
+  state: CeilingShapeBuilderState,
+  regionId: string
+): CeilingShapeBuilderState {
+  return withValidation({
+    ...state,
+    fabricRegions: state.fabricRegions.filter((region) => region.id !== regionId),
+    viewState: state.viewState.selectedElementType === 'region' && state.viewState.selectedElementId === regionId
+      ? {
+        ...state.viewState,
+        selectedElementType: null,
+        selectedElementId: null,
+      }
+      : state.viewState,
+    updatedAt: new Date().toISOString(),
+  });
+}
+
+export function createFabricRegionFromCornice(
+  state: CeilingShapeBuilderState,
+  objectId: string
+): CeilingShapeBuilderState {
+  const object = state.objects.find((item) => item.id === objectId);
+  const rawPoints = object ? corniceRegionRawPoints(state, object) : null;
+
+  if (!object || !rawPoints) {
+    return state;
+  }
+
+  return addBuilderFabricRegion(
+    state,
+    rawPoints,
+    'cornice',
+    object.id
+  );
+}
+
+export function calculateBuilderBounds(state: Pick<CeilingShapeBuilderState, 'points' | 'objects' | 'seams' | 'fabricRegions'>) {
   const candidates = [
     ...state.points.map((pointValue) => ({ x: pointValue.x, y: pointValue.y })),
+    ...state.fabricRegions.flatMap((region) => region.points.map((pointValue) => ({ x: pointValue.x, y: pointValue.y }))),
     ...state.objects.flatMap((object) => [
       { x: object.x, y: object.y },
       ...(object.endX === undefined || object.endY === undefined ? [] : [{ x: object.endX, y: object.endY }]),
@@ -811,18 +1077,37 @@ export function calculateBuilderMetrics(state: CeilingShapeBuilderState): Ceilin
 }
 
 export function pointInsideContour(state: CeilingShapeBuilderState, x: number, y: number) {
-  if (!state.isClosed || state.points.length < 3) return false;
+  return state.isClosed && polygonContainsPoint(state.points, x, y);
+}
 
-  let inside = false;
-  for (let index = 0, previousIndex = state.points.length - 1; index < state.points.length; previousIndex = index, index += 1) {
-    const current = state.points[index];
-    const previous = state.points[previousIndex];
-    const intersects = ((current.y > y) !== (previous.y > y))
-      && (x < ((previous.x - current.x) * (y - current.y)) / (previous.y - current.y || 1) + current.x);
-    if (intersects) inside = !inside;
-  }
+export function calculateFabricPanels(state: CeilingShapeBuilderState): CeilingBuilderFabricPanel[] {
+  if (!state.isClosed || state.points.length < 3) return [];
 
-  return inside;
+  const outerGrossAreaM2 = round(polygonAreaMm2(state.points) / 1_000_000, 2);
+  const regions = state.fabricRegions.map((region) => ({
+    region,
+    grossAreaM2: round(polygonAreaMm2(region.points) / 1_000_000, 2),
+  }));
+  const nestedAreaM2 = round(regions.reduce((sum, item) => sum + item.grossAreaM2, 0), 2);
+
+  return [
+    {
+      id: 'outer-panel',
+      label: 'Полотно 1',
+      areaM2: round(Math.max(0, outerGrossAreaM2 - nestedAreaM2), 2),
+      grossAreaM2: outerGrossAreaM2,
+      isOuter: true,
+      sourceRegionId: null,
+    },
+    ...regions.map(({ region, grossAreaM2 }) => ({
+      id: `panel-${region.id}`,
+      label: region.label,
+      areaM2: grossAreaM2,
+      grossAreaM2,
+      isOuter: false,
+      sourceRegionId: region.id,
+    })),
+  ];
 }
 
 export function fabricOrientationAngle(state: CeilingShapeBuilderState) {
@@ -947,6 +1232,46 @@ export function validateBuilderState(state: CeilingShapeBuilderState): CeilingBu
         actionMode: 'objects',
       });
     }
+  });
+
+  state.fabricRegions.forEach((region) => {
+    if (region.points.length < 3) {
+      issues.push({
+        id: `region-insufficient-${region.id}`,
+        severity: 'critical',
+        message: `У ${region.label} недостаточно точек для замкнутого полотна.`,
+        relatedElementType: 'region',
+        relatedElementId: region.id,
+        actionMode: 'shape',
+      });
+      return;
+    }
+
+    if (region.points.some((regionPoint) => !pointInsideContour(state, regionPoint.x, regionPoint.y))) {
+      issues.push({
+        id: `region-outside-${region.id}`,
+        severity: 'critical',
+        message: `${region.label} выходит за основной контур помещения.`,
+        relatedElementType: 'region',
+        relatedElementId: region.id,
+        actionMode: 'shape',
+      });
+    }
+  });
+
+  state.fabricRegions.forEach((region, index) => {
+    state.fabricRegions.slice(index + 1).forEach((otherRegion) => {
+      if (polygonsOverlap(region.points, otherRegion.points)) {
+        issues.push({
+          id: `regions-overlap-${region.id}-${otherRegion.id}`,
+          severity: 'warning',
+          message: `${region.label} пересекается с ${otherRegion.label}. Проверьте разбиение полотен.`,
+          relatedElementType: 'region',
+          relatedElementId: region.id,
+          actionMode: 'shape',
+        });
+      }
+    });
   });
 
   if (state.diagonals.length === 0) {
@@ -1097,6 +1422,7 @@ export function createBuilderStateFromSketch(
       ...sketch.builderState,
       roomId: roomId ?? sketch.builderState.roomId,
       calculationId: calculationId ?? sketch.builderState.calculationId,
+      fabricRegions: sketch.builderState.fabricRegions || [],
       viewState: {
         ...defaultViewState(),
         ...sketch.builderState.viewState,
@@ -1137,6 +1463,7 @@ export function createBuilderStateFromSketch(
       orientationAngle: sketch.fabric.directionDeg,
     },
     seams: sketch.fabric.seams.map(buildSeamFromSketch),
+    fabricRegions: [],
     viewState: defaultViewState(),
     validationIssues: [],
     notes: {
@@ -1228,6 +1555,7 @@ export function builderToCeilingSketch(
 
 export function buildCalculationTransferPayload(state: CeilingShapeBuilderState): CalculationTransferPayload {
   const metrics = calculateBuilderMetrics(state);
+  const fabricPanels = calculateFabricPanels(state);
   const innerCornerCount = state.angles.filter((angle) => angle.type === 'inner').length;
   const outerCornerCount = state.angles.filter((angle) => angle.type === 'outer').length;
   const countByType = (type: CeilingBuilderObjectType) => state.objects
@@ -1252,6 +1580,9 @@ export function buildCalculationTransferPayload(state: CeilingShapeBuilderState)
     spotlightCount: countByType('spotlight') + countByType('spotlight_group'),
     corniceLengthM,
     fabricSettings: state.fabricSettings,
+    fabricRegions: state.fabricRegions,
+    fabricPanels,
+    fabricPanelCount: fabricPanels.length,
     objects: state.objects,
     notes: {
       ...state.notes,

@@ -43,6 +43,7 @@ import type {
 } from '../types';
 import {
   addBuilderDiagonal,
+  addBuilderFabricRegion,
   addBuilderObject,
   addBuilderPoint,
   addBuilderSeam,
@@ -50,18 +51,23 @@ import {
   buildCalculationTransferPayload,
   calculateBuilderBounds,
   calculateBuilderMetrics,
+  calculateFabricPanels,
   closeBuilderContour,
+  createFabricRegionFromCornice,
   createBuilderStateFromSketch,
   defaultBuilderViewport,
   fabricOrientationAngle,
   fabricNeedsSeam,
+  fabricRegionCentroid,
   insertBuilderPointAfter,
   measuredWallLengthText,
   moveBuilderPoint,
+  moveBuilderFabricRegionPoint,
   parseDimensionInput,
   pointInsideContour,
   projectedFabricWidthMm,
   removeBuilderDiagonal,
+  removeBuilderFabricRegion,
   removeBuilderObject,
   removeBuilderPoint,
   renameBuilderPoint,
@@ -70,6 +76,7 @@ import {
   setBuilderWallLength,
   syncBuilderIntoSketch,
   updateBuilderDiagonal,
+  updateBuilderFabricRegion,
   updateBuilderFabricSettings,
   updateBuilderNotes,
   updateBuilderObject,
@@ -86,8 +93,9 @@ interface ViewBoxState {
 }
 
 interface DragTarget {
-  kind: 'point' | 'object';
+  kind: 'point' | 'object' | 'region-point';
   id: string;
+  regionId?: string;
 }
 
 interface SinglePanGesture {
@@ -240,7 +248,7 @@ export default function CeilingBuilderDialog({
   const [builder, setBuilder] = useState(() => createBuilderStateFromSketch(value, roomId, calculationId));
   const [history, setHistory] = useState<CeilingShapeBuilderState[]>([]);
   const [future, setFuture] = useState<CeilingShapeBuilderState[]>([]);
-  const [sheetState, setSheetState] = useState<SheetState>('half');
+  const [sheetState, setSheetState] = useState<SheetState>('collapsed');
   const [dimensionCursor, setDimensionCursor] = useState(0);
   const [dimensionInput, setDimensionInput] = useState(() => {
     const initial = createBuilderStateFromSketch(value, roomId, calculationId);
@@ -253,6 +261,9 @@ export default function CeilingBuilderDialog({
   const [showWarningConfirm, setShowWarningConfirm] = useState(false);
   const [preciseStepMm, setPreciseStepMm] = useState(50);
   const [frozenViewBox, setFrozenViewBox] = useState<ViewBoxState | null>(null);
+  const [draftRegionPoints, setDraftRegionPoints] = useState<Array<Pick<CeilingBuilderPoint, 'x' | 'y'>>>([]);
+  const [drawingRegion, setDrawingRegion] = useState(false);
+  const [selectedPanelId, setSelectedPanelId] = useState('outer-panel');
   const surfaceRef = useRef<HTMLDivElement | null>(null);
   const svgRef = useRef<SVGSVGElement | null>(null);
   const dragTargetRef = useRef<DragTarget | null>(null);
@@ -331,6 +342,7 @@ export default function CeilingBuilderDialog({
   }, []);
 
   const metrics = useMemo(() => calculateBuilderMetrics(builder), [builder]);
+  const fabricPanels = useMemo(() => calculateFabricPanels(builder), [builder]);
   const validationIssues = useMemo(() => validateBuilderState(builder), [builder]);
   const criticalIssues = validationIssues.filter((issue) => issue.severity === 'critical');
   const warningIssues = validationIssues.filter((issue) => issue.severity === 'warning');
@@ -343,6 +355,10 @@ export default function CeilingBuilderDialog({
   const selectedObject = builder.viewState.selectedElementType === 'object'
     ? builder.objects.find((object) => object.id === builder.viewState.selectedElementId) || null
     : null;
+  const selectedRegion = builder.viewState.selectedElementType === 'region'
+    ? builder.fabricRegions.find((region) => region.id === builder.viewState.selectedElementId) || null
+    : null;
+  const selectedPanel = fabricPanels.find((panel) => panel.id === selectedPanelId) || fabricPanels[0] || null;
   const viewBox = frozenViewBox || buildViewBox(builder);
   const currentWall = builder.walls[dimensionCursor] || null;
 
@@ -354,7 +370,7 @@ export default function CeilingBuilderDialog({
         activeMode,
       },
     }));
-    setSheetState(activeMode === 'summary' ? 'full' : 'half');
+    setSheetState(activeMode === 'shape' ? 'collapsed' : activeMode === 'summary' ? 'full' : 'half');
   }
 
   function commit(next: CeilingShapeBuilderState) {
@@ -406,6 +422,9 @@ export default function CeilingBuilderDialog({
         selectedElementId: id,
       },
     }));
+    if (type === 'region' && id) {
+      setSelectedPanelId(`panel-${id}`);
+    }
   }
 
   function worldPointFromClient(clientX: number, clientY: number) {
@@ -419,7 +438,7 @@ export default function CeilingBuilderDialog({
   }
 
   function constrainPointDrag(rawPoint: { x: number; y: number }, target: DragTarget) {
-    if (target.kind !== 'point' || !builder.viewState.orthoEnabled) return rawPoint;
+    if ((target.kind !== 'point' && target.kind !== 'region-point') || !builder.viewState.orthoEnabled) return rawPoint;
 
     const orthoDrag = orthoDragRef.current;
     if (!orthoDrag || orthoDrag.pointId !== target.id) return rawPoint;
@@ -450,6 +469,17 @@ export default function CeilingBuilderDialog({
       : { x: previous.x, y: rawPoint.y };
   }
 
+  function constrainNewRegionPoint(rawPoint: { x: number; y: number }) {
+    if (!builder.viewState.orthoEnabled || draftRegionPoints.length === 0) return rawPoint;
+
+    const previous = draftRegionPoints[draftRegionPoints.length - 1];
+    const dx = rawPoint.x - previous.x;
+    const dy = rawPoint.y - previous.y;
+    return Math.abs(dx) >= Math.abs(dy)
+      ? { x: rawPoint.x, y: previous.y }
+      : { x: previous.x, y: rawPoint.y };
+  }
+
   function scheduleDragUpdate() {
     if (dragRafRef.current !== null) return;
 
@@ -460,11 +490,29 @@ export default function CeilingBuilderDialog({
       if (!target || !point) return;
       const constrainedPoint = constrainPointDrag(point, target);
 
-      setBuilder((prev) => (
-        target.kind === 'point'
-          ? moveBuilderPoint(prev, target.id, constrainedPoint.x, constrainedPoint.y)
-          : updateBuilderObject(prev, target.id, { x: constrainedPoint.x, y: constrainedPoint.y })
-      ));
+      setBuilder((prev) => {
+        if (target.kind === 'point') {
+          return moveBuilderPoint(prev, target.id, constrainedPoint.x, constrainedPoint.y);
+        }
+
+        if (target.kind === 'region-point' && target.regionId) {
+          return moveBuilderFabricRegionPoint(prev, target.regionId, target.id, constrainedPoint.x, constrainedPoint.y);
+        }
+
+        const originalObject = dragStartStateRef.current?.objects.find((object) => object.id === target.id);
+        if (originalObject?.endX !== undefined && originalObject.endY !== undefined) {
+          const deltaX = constrainedPoint.x - originalObject.x;
+          const deltaY = constrainedPoint.y - originalObject.y;
+          return updateBuilderObject(prev, target.id, {
+            x: constrainedPoint.x,
+            y: constrainedPoint.y,
+            endX: originalObject.endX + deltaX,
+            endY: originalObject.endY + deltaY,
+          });
+        }
+
+        return updateBuilderObject(prev, target.id, { x: constrainedPoint.x, y: constrainedPoint.y });
+      });
     });
   }
 
@@ -475,8 +523,12 @@ export default function CeilingBuilderDialog({
     dragStartStateRef.current = cloneState(builder);
     setFrozenViewBox(buildViewBox(builder));
     pendingDragPointRef.current = worldPointFromClient(event.clientX, event.clientY);
-    if (target.kind === 'point') {
-      const currentPoint = builder.points.find((point) => point.id === target.id);
+    if (target.kind === 'point' || target.kind === 'region-point') {
+      const currentPoint = target.kind === 'point'
+        ? builder.points.find((point) => point.id === target.id)
+        : builder.fabricRegions
+          .find((region) => region.id === target.regionId)
+          ?.points.find((point) => point.id === target.id);
       orthoDragRef.current = currentPoint
         ? {
           pointId: target.id,
@@ -486,12 +538,18 @@ export default function CeilingBuilderDialog({
         }
         : null;
     }
-    selectElement(target.kind, target.id);
+    selectElement(target.kind === 'region-point' ? 'region' : target.kind, target.kind === 'region-point' ? target.regionId || null : target.id);
     if (target.kind === 'point' && builder.viewState.activeMode !== 'shape') {
+      setMode('shape');
+    }
+    if (target.kind === 'region-point' && builder.viewState.activeMode !== 'shape') {
       setMode('shape');
     }
     if (target.kind === 'object' && builder.viewState.activeMode !== 'objects') {
       setMode('objects');
+    }
+    if (builder.viewState.activeMode === 'shape') {
+      setSheetState('collapsed');
     }
     event.currentTarget.setPointerCapture(event.pointerId);
   }
@@ -529,6 +587,9 @@ export default function CeilingBuilderDialog({
 
   function handleCanvasPointerDown(event: ReactPointerEvent<SVGSVGElement>) {
     event.preventDefault();
+    if (builder.viewState.activeMode === 'shape') {
+      setSheetState('collapsed');
+    }
     pointersRef.current.set(event.pointerId, { x: event.clientX, y: event.clientY });
     event.currentTarget.setPointerCapture(event.pointerId);
     tapStartRef.current = { x: event.clientX, y: event.clientY, moved: false };
@@ -629,6 +690,12 @@ export default function CeilingBuilderDialog({
     tapStartRef.current = null;
     if (!wasTap) return;
 
+    if (builder.viewState.activeMode === 'shape' && drawingRegion) {
+      const point = constrainNewRegionPoint(worldPointFromClient(event.clientX, event.clientY));
+      setDraftRegionPoints((prev) => [...prev, point]);
+      return;
+    }
+
     if (builder.viewState.activeMode === 'shape' && builder.template === 'free' && !builder.isClosed) {
       const point = worldPointFromClient(event.clientX, event.clientY);
       mutate((state) => {
@@ -698,18 +765,49 @@ export default function CeilingBuilderDialog({
     setShowWarningConfirm(false);
   }
 
+  function startRegionDrawing() {
+    setDraftRegionPoints([]);
+    setDrawingRegion(true);
+    selectElement(null, null);
+    setSelectedPanelId('outer-panel');
+    setSheetState('collapsed');
+  }
+
+  function cancelRegionDrawing() {
+    setDraftRegionPoints([]);
+    setDrawingRegion(false);
+  }
+
+  function closeRegionDrawing() {
+    if (draftRegionPoints.length < 3) return;
+    mutate((state) => addBuilderFabricRegion(state, draftRegionPoints));
+    setDraftRegionPoints([]);
+    setDrawingRegion(false);
+    setSheetState('half');
+  }
+
   function renderShapePanel() {
     return (
       <Stack spacing={2}>
         <Box>
           <Typography variant="subtitle1" sx={{ fontWeight: 700, mb: 1 }}>Шаблон</Typography>
-          <Stack direction="row" spacing={1} sx={{ flexWrap: 'wrap', gap: 1 }}>
+          <Stack
+            direction="row"
+            spacing={1}
+            sx={{
+              overflowX: 'auto',
+              WebkitOverflowScrolling: 'touch',
+              touchAction: 'pan-x',
+              pb: 0.5,
+              '&::-webkit-scrollbar': { display: 'none' },
+            }}
+          >
             {(['rectangle', 'l_shape', 'u_shape', 'polygon', 'free'] as CeilingShapeTemplate[]).map((template) => (
               <Button
                 key={template}
                 variant={builder.template === template ? 'contained' : 'outlined'}
                 onClick={() => mutate((state) => applyTemplate(state, template))}
-                sx={{ minHeight: 44 }}
+                sx={{ minHeight: 44, flexShrink: 0 }}
               >
                 {templateLabel(template)}
               </Button>
@@ -741,6 +839,57 @@ export default function CeilingBuilderDialog({
         <Alert severity={builder.isClosed ? 'success' : 'warning'}>
           {builder.isClosed ? 'Контур замкнут.' : 'Контур не замкнут.'}
         </Alert>
+
+        <Stack spacing={1.25}>
+          <Divider />
+          <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1}>
+            <Button
+              variant={drawingRegion ? 'contained' : 'outlined'}
+              onClick={drawingRegion ? cancelRegionDrawing : startRegionDrawing}
+              disabled={!builder.isClosed}
+              sx={{ minHeight: 48 }}
+            >
+              {drawingRegion ? 'Отменить полотно' : '+ Внутреннее полотно'}
+            </Button>
+            {drawingRegion && (
+              <Button
+                variant="contained"
+                onClick={closeRegionDrawing}
+                disabled={draftRegionPoints.length < 3}
+                sx={{ minHeight: 48 }}
+              >
+                Замкнуть внутреннее полотно
+              </Button>
+            )}
+          </Stack>
+          <Typography variant="body2" color="text.secondary">
+            {drawingRegion
+              ? `Ставьте точки нового полотна на схеме. Точек: ${draftRegionPoints.length}.`
+              : 'Внутренние контуры считаются как отдельные полотна внутри комнаты.'}
+          </Typography>
+          <Stack direction="row" spacing={1} sx={{ flexWrap: 'wrap', gap: 1 }}>
+            {fabricPanels.map((panel) => (
+              <Chip
+                key={panel.id}
+                label={`${panel.label}: ${panel.areaM2} м2`}
+                color={selectedPanel?.id === panel.id ? 'primary' : 'default'}
+                onClick={() => {
+                  setSelectedPanelId(panel.id);
+                  if (panel.sourceRegionId) {
+                    selectElement('region', panel.sourceRegionId);
+                  } else {
+                    selectElement(null, null);
+                  }
+                }}
+              />
+            ))}
+          </Stack>
+          {selectedPanel && (
+            <Alert severity="info">
+              {selectedPanel.label}: {selectedPanel.areaM2} м2 чистой площади полотна.
+            </Alert>
+          )}
+        </Stack>
 
         {selectedPoint && (
           <Stack spacing={1.25}>
@@ -780,6 +929,34 @@ export default function CeilingBuilderDialog({
               <Button onClick={() => moveSelectedPointBy(-preciseStepMm, 0)}>Влево</Button>
               <Button onClick={() => moveSelectedPointBy(preciseStepMm, 0)}>Вправо</Button>
             </Stack>
+          </Stack>
+        )}
+
+        {selectedRegion && (
+          <Stack spacing={1.25}>
+            <Divider />
+            <Typography variant="subtitle1" sx={{ fontWeight: 700 }}>{selectedRegion.label}</Typography>
+            <TextField
+              label="Название полотна"
+              value={selectedRegion.label}
+              onChange={(event) => mutate((state) => updateBuilderFabricRegion(state, selectedRegion.id, { label: event.target.value }))}
+            />
+            <TextField
+              label="Комментарий"
+              value={selectedRegion.comment}
+              onChange={(event) => mutate((state) => updateBuilderFabricRegion(state, selectedRegion.id, { comment: event.target.value }))}
+              multiline
+              minRows={2}
+            />
+            <Button
+              color="error"
+              onClick={() => {
+                mutate((state) => removeBuilderFabricRegion(state, selectedRegion.id));
+                setSelectedPanelId('outer-panel');
+              }}
+            >
+              Удалить полотно
+            </Button>
           </Stack>
         )}
       </Stack>
@@ -904,6 +1081,8 @@ export default function CeilingBuilderDialog({
   }
 
   function renderObjectEditor(object: CeilingBuilderObject) {
+    const hasDerivedRegion = builder.fabricRegions.some((region) => region.sourceObjectId === object.id);
+
     return (
       <Stack spacing={1.25}>
         <Divider />
@@ -953,6 +1132,15 @@ export default function CeilingBuilderDialog({
             value={object.lengthMm || ''}
             onChange={(event) => mutate((state) => updateBuilderObject(state, object.id, { lengthMm: Number(event.target.value || 0) }))}
           />
+        )}
+        {object.type === 'cornice' && (
+          <Button
+            variant="outlined"
+            onClick={() => mutate((state) => createFabricRegionFromCornice(state, object.id))}
+            disabled={hasDerivedRegion}
+          >
+            {hasDerivedRegion ? 'Полотно за карнизом уже создано' : 'Создать полотно за карнизом'}
+          </Button>
         )}
         <TextField
           label="Комментарий"
@@ -1177,6 +1365,7 @@ export default function CeilingBuilderDialog({
           <Chip label={`${metrics.corners} угл.`} />
           <Chip label={`${payload.pipeCount} труб`} />
           <Chip label={`${payload.spotlightCount} свет.`} />
+          <Chip label={`${payload.fabricPanelCount} полотен`} />
         </Stack>
 
         <Box>
@@ -1187,6 +1376,15 @@ export default function CeilingBuilderDialog({
               <Alert key={issue.id} severity={issue.severity === 'critical' ? 'error' : 'warning'}>
                 {issue.message}
               </Alert>
+            ))}
+          </Stack>
+        </Box>
+
+        <Box>
+          <Typography variant="subtitle1" sx={{ fontWeight: 700, mb: 1 }}>Полотна</Typography>
+          <Stack direction="row" spacing={1} sx={{ flexWrap: 'wrap', gap: 1 }}>
+            {payload.fabricPanels.map((panel) => (
+              <Chip key={panel.id} label={`${panel.label}: ${panel.areaM2} м2`} />
             ))}
           </Stack>
         </Box>
@@ -1354,7 +1552,18 @@ export default function CeilingBuilderDialog({
                 pointerEvents: 'none',
               }}
             >
-              <Stack direction="row" spacing={1} sx={{ pointerEvents: 'auto' }}>
+              <Stack
+                direction="row"
+                spacing={1}
+                sx={{
+                  pointerEvents: 'auto',
+                  maxWidth: 'calc(100vw - 116px)',
+                  overflowX: 'auto',
+                  WebkitOverflowScrolling: 'touch',
+                  touchAction: 'pan-x',
+                  '&::-webkit-scrollbar': { display: 'none' },
+                }}
+              >
                 <Button variant="outlined" onClick={undo} disabled={history.length === 0} sx={{ minWidth: 48, minHeight: 44 }}>
                   <UndoIcon />
                 </Button>
@@ -1439,10 +1648,88 @@ export default function CeilingBuilderDialog({
                 <polygon
                   points={builder.points.map((point) => `${point.x},${point.y}`).join(' ')}
                   fill="#dbeafe"
-                  stroke="#17202a"
-                  strokeWidth="28"
+                  stroke={selectedPanelId === 'outer-panel' ? '#2563eb' : '#17202a'}
+                  strokeWidth={selectedPanelId === 'outer-panel' ? '34' : '28'}
                   strokeLinejoin="round"
+                  onPointerDown={(event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    setSelectedPanelId('outer-panel');
+                    selectElement(null, null);
+                    setSheetState('half');
+                  }}
                 />
+              )}
+
+              {builder.fabricRegions.map((region, index) => {
+                const centroid = fabricRegionCentroid(region);
+                const selected = selectedRegion?.id === region.id;
+                const fills = ['#fee2e2', '#dcfce7', '#fef3c7', '#ede9fe'];
+
+                return (
+                  <g key={region.id}>
+                    <polygon
+                      points={region.points.map((point) => `${point.x},${point.y}`).join(' ')}
+                      fill={fills[index % fills.length]}
+                      stroke={selected ? '#2563eb' : '#0f766e'}
+                      strokeWidth={selected ? 28 : 22}
+                      strokeLinejoin="round"
+                      onPointerDown={(event) => {
+                        event.preventDefault();
+                        event.stopPropagation();
+                        setSelectedPanelId(`panel-${region.id}`);
+                        selectElement('region', region.id);
+                        setSheetState('half');
+                      }}
+                    />
+                    {builder.viewState.showLabels && (
+                      <text x={centroid.x} y={centroid.y} textAnchor="middle" fontSize="64" fontWeight="700" fill="#0f172a">
+                        {region.label}
+                      </text>
+                    )}
+                    {selected && region.points.map((regionPoint) => (
+                      <circle
+                        key={regionPoint.id}
+                        cx={regionPoint.x}
+                        cy={regionPoint.y}
+                        r="62"
+                        fill="#ffffff"
+                        stroke="#2563eb"
+                        strokeWidth="20"
+                        onPointerDown={(event) => startDrag(event, {
+                          kind: 'region-point',
+                          id: regionPoint.id,
+                          regionId: region.id,
+                        })}
+                      />
+                    ))}
+                  </g>
+                );
+              })}
+
+              {drawingRegion && draftRegionPoints.length > 0 && (
+                <>
+                  <polyline
+                    points={draftRegionPoints.map((point) => `${point.x},${point.y}`).join(' ')}
+                    fill="none"
+                    stroke="#f97316"
+                    strokeWidth="24"
+                    strokeDasharray="42 24"
+                    strokeLinejoin="round"
+                    strokeLinecap="round"
+                  />
+                  {draftRegionPoints.map((point, index) => (
+                    <circle
+                      key={`${point.x}-${point.y}-${index}`}
+                      cx={point.x}
+                      cy={point.y}
+                      r="58"
+                      fill="#ffffff"
+                      stroke="#f97316"
+                      strokeWidth="18"
+                    />
+                  ))}
+                </>
               )}
 
               {!builder.isClosed && builder.points.length > 1 && (
@@ -1621,7 +1908,7 @@ export default function CeilingBuilderDialog({
               sx={{
                 position: 'absolute',
                 left: 12,
-                bottom: sheetState === 'collapsed' ? 108 : sheetState === 'half' ? 332 : 'calc(62vh)',
+                bottom: sheetState === 'collapsed' ? 76 : sheetState === 'half' ? 332 : 'calc(62vh)',
                 zIndex: 1,
                 display: 'flex',
                 gap: 1,
@@ -1641,11 +1928,11 @@ export default function CeilingBuilderDialog({
                 bottom: 0,
                 zIndex: 3,
                 height: sheetState === 'collapsed'
-                  ? 104
+                  ? 72
                   : sheetState === 'half'
                     ? 328
                     : '62vh',
-                minHeight: 104,
+                minHeight: 72,
                 maxHeight: 'calc(var(--ceiling-builder-vh, 100dvh) - 154px)',
                 bgcolor: 'background.paper',
                 borderTopLeftRadius: 16,
@@ -1704,10 +1991,13 @@ export default function CeilingBuilderDialog({
               borderTop: '1px solid',
               borderColor: 'divider',
               bgcolor: 'background.paper',
-              display: 'grid',
-              gridTemplateColumns: 'repeat(6, minmax(0, 1fr))',
+              display: 'flex',
               gap: 0.5,
               flexShrink: 0,
+              overflowX: 'auto',
+              WebkitOverflowScrolling: 'touch',
+              touchAction: 'pan-x',
+              '&::-webkit-scrollbar': { display: 'none' },
             }}
           >
             {MODES.map((mode) => (
@@ -1717,6 +2007,8 @@ export default function CeilingBuilderDialog({
                 onClick={() => setMode(mode.id)}
                 sx={{
                   minWidth: 0,
+                  width: 92,
+                  flex: '0 0 92px',
                   minHeight: 54,
                   px: 0.5,
                   fontSize: 12,

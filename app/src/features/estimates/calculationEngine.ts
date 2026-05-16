@@ -16,6 +16,7 @@ import type {
   SavedEstimateRoom,
 } from '../../types';
 import { adjustedPrice, labelOf, roundPrice } from '../../utils';
+import { createClientId } from '../../clientId';
 import {
   buildCeilingProjectSnapshot,
   calculateCeilingSketchMetrics,
@@ -603,7 +604,7 @@ export function recalculateSavedEstimatePosition(
 export function createSavedEstimatePosition(input: CreateSavedEstimatePositionInput): SavedEstimatePosition {
   const qty = toNumber(input.qty) || 1;
   const price = toNumber(input.price);
-  const itemId = input.itemId || `local-${crypto.randomUUID()}`;
+  const itemId = input.itemId || createClientId('local');
   const itemName = normalizeText(input.name) || 'Без названия';
   const unit = normalizeText(input.unit) || 'шт.';
   const category = normalizeText(input.category) || 'Локальные';
@@ -611,7 +612,7 @@ export function createSavedEstimatePosition(input: CreateSavedEstimatePositionIn
   const itemType = input.itemType || 'tovar';
 
   return {
-    id: crypto.randomUUID(),
+    id: createClientId(),
     smeta_id: input.estimateId,
     position_index: input.positionIndex,
     room_id: input.roomId,

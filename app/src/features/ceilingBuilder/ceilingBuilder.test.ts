@@ -1,12 +1,15 @@
 import { describe, expect, it } from 'vitest';
 import {
   addBuilderDiagonal,
+  addBuilderFabricRegion,
   addBuilderObject,
   applyTemplate,
   buildCalculationTransferPayload,
   closeBuilderContour,
+  createFabricRegionFromCornice,
   createBuilderStateFromSketch,
   createDefaultCeilingBuilderState,
+  calculateFabricPanels,
   fabricNeedsSeam,
   parseDimensionInput,
   setBuilderWallLength,
@@ -73,6 +76,7 @@ describe('ceilingBuilder', () => {
     };
 
     expect(createBuilderStateFromSketch(sketch).viewState.orthoEnabled).toBe(false);
+    expect(createBuilderStateFromSketch(sketch).fabricRegions).toEqual([]);
   });
 
   it('помечает необходимость шва по ширине рулона', () => {
@@ -90,5 +94,33 @@ describe('ceilingBuilder', () => {
     state = addBuilderDiagonal(state, state.points[0].id, state.points[2].id, 1000);
 
     expect(validateBuilderState(state).some((issue) => issue.id.startsWith('diagonal-mismatch-'))).toBe(true);
+  });
+
+  it('считает внутренний контур отдельным полотном и вычитает его из внешнего', () => {
+    let state = createDefaultCeilingBuilderState('rectangle');
+    state = addBuilderFabricRegion(state, [
+      { x: 1000, y: 800 },
+      { x: 2200, y: 800 },
+      { x: 2200, y: 1800 },
+      { x: 1000, y: 1800 },
+    ]);
+
+    const panels = calculateFabricPanels(state);
+
+    expect(panels).toHaveLength(2);
+    expect(panels[0]).toMatchObject({ label: 'Полотно 1', areaM2: 12.24 });
+    expect(panels[1]).toMatchObject({ label: 'Полотно 2', areaM2: 1.2 });
+  });
+
+  it('умеет создать отдельное полотно за карнизом', () => {
+    let state = createDefaultCeilingBuilderState('rectangle');
+    state = addBuilderObject(state, 'cornice');
+    const cornice = state.objects.find((object) => object.type === 'cornice');
+    if (!cornice) throw new Error('cornice missing');
+
+    state = createFabricRegionFromCornice(state, cornice.id);
+
+    expect(state.fabricRegions).toHaveLength(1);
+    expect(calculateFabricPanels(state)).toHaveLength(2);
   });
 });

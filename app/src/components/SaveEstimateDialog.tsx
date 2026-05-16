@@ -48,6 +48,7 @@ import {
   createDefaultCeilingSketch,
   formatSketchNumber,
 } from '../features/ceilingSketch/ceilingSketch';
+import { createClientId } from '../clientId';
 
 interface RuleCatalogOption {
   id: string;
@@ -78,7 +79,7 @@ function emptyRoom(index: number): EstimateRoomDraft {
   const metrics = calculateCeilingSketchMetrics(ceilingSketch);
 
   return {
-    id: crypto.randomUUID(),
+    id: createClientId(),
     name: `Комната ${index}`,
     area: formatSketchNumber(metrics.areaM2),
     perimeter: formatSketchNumber(metrics.perimeterM),
